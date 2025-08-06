@@ -27,3 +27,8 @@ poetry.lock
 # Ignore generated docs
 docs/_build
 docs/api
+
+.env
+# Environment variables file
+
+.pylintrc

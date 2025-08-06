@@ -17,6 +17,7 @@
 import enum
 
 from game_arena.harness import model_generation_http
+from game_arena.harness import model_generation_openrouter
 from game_arena.harness import model_generation_sdk
 
 
@@ -32,6 +33,9 @@ class ModelRegistry(enum.Enum):
   OPENAI_GPT_4_1 = "gpt-4.1-2025-04-14"
   OPENAI_O3 = "o3-2025-04-16"
   OPENAI_O4_MINI = "o4-mini-2025-04-16"
+  OPENROUTER_CLAUDE_SONNET = "anthropic/claude-3.5-sonnet"
+  OPENROUTER_GPT_4O_MINI = "openai/gpt-4o-mini"
+  OPENROUTER_HORIZON_BETA = "openrouter/horizon-beta"
   QWEN_3 = "Qwen/Qwen3-235B-A22B-Thinking-2507"
   QWEN_3_PARALLEL_THREE = "Qwen/Qwen3-235B-A22B-Thinking-2507"
   XAI_GROK_4 = "grok-4-0709"
@@ -100,6 +104,23 @@ class ModelRegistry(enum.Enum):
           | ModelRegistry.OPENAI_O4_MINI
       ):
         return model_generation_sdk.OpenAIChatCompletionsModel(
+            model_name=self.value,
+            api_key=api_key,
+            **kwargs,
+        )
+      case (
+          ModelRegistry.OPENROUTER_CLAUDE_SONNET
+          | ModelRegistry.OPENROUTER_GPT_4O_MINI
+          | ModelRegistry.OPENROUTER_HORIZON_BETA
+      ):
+        default_kwargs = {
+            "model_options": {
+                "temperature": 0.7,
+                "max_output_tokens": 1500,
+            },
+        }
+        kwargs = default_kwargs | kwargs
+        return model_generation_openrouter.OpenRouterModel(
             model_name=self.value,
             api_key=api_key,
             **kwargs,

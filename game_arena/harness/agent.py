@@ -23,7 +23,9 @@ import traceback
 from typing import Any, Generic, Protocol, TypeAlias, TypeVar, TypedDict
 
 from absl import logging
+from game_arena.harness import enhanced_parsers
 from game_arena.harness import game_notation_examples
+from game_arena.harness import gui
 from game_arena.harness import model_generation
 from game_arena.harness import parsers
 from game_arena.harness import prompt_generation
@@ -279,9 +281,7 @@ class ChessLLMAgent(
 # TODO(John Schultz): Remove LLMAgent abstraction in favor of a generic Sampler
 # agent, and in the process remove these default prompt and response parsers.
 prompt_generator = prompt_generation.PromptGeneratorText()
-chained_parser = parsers.ChainedMoveParser(
-    [parsers.RuleBasedMoveParser(), parsers.SoftMoveParser("chess")]
-)
+chained_parser = enhanced_parsers.create_rule_then_enhanced_parser()
 
 
 def default_chess_prompt_builder(
@@ -510,3 +510,122 @@ def build_default_rethink_agent(
       prompt_template=prompts.PromptTemplate.NO_LEGAL_ACTIONS_RETHINK_APPENDED,
   )
   return agent
+
+
+
+class ChessRethinkAgentWithGUI(ChessRethinkAgent):
+  """ChessRethinkAgent with GUI support for visual chess board display."""
+  
+  def __init__(
+      self,
+      sampler: rethink.RethinkSampler,
+      prompt_template: prompts.PromptTemplate,
+      gui_manager: gui.GUIManager | None = None,
+      player1_name: str = "Player 1 (Black)",
+      player2_name: str = "Player 2 (White)",
+      max_sampler_calls: int | None = None,
+      random_move_fallback: bool = False,
+      seed: int | None = None,
+  ):
+    super().__init__(
+        sampler=sampler,
+        prompt_template=prompt_template,
+        max_sampler_calls=max_sampler_calls,
+        random_move_fallback=random_move_fallback,
+        seed=seed,
+    )
+    self.gui_manager = gui_manager
+    self.player1_name = player1_name
+    self.player2_name = player2_name
+    self._move_number = 0
+    self._game_started = False
+
+  def __call__(
+      self,
+      observation: Mapping[str, Any],
+      configuration: Mapping[str, Any],
+      **kwargs,
+  ) -> KaggleSpielActionWithExtras:
+    """Returns an action with GUI updates."""
+    serialized_game_and_state = observation.get("serializedGameAndState")
+    if not serialized_game_and_state:
+      return super().__call__(observation, configuration, **kwargs)
+    
+    _, pyspiel_state = pyspiel.deserialize_game_and_state(
+        serialized_game_and_state
+    )
+    
+    # Start GUI on first move
+    if self.gui_manager and not self._game_started:
+      try:
+        caption = f"Game Arena - White: {self.player2_name} vs Black: {self.player1_name}"
+        self.gui_manager.start(pyspiel_state.to_string(), caption=caption)
+        self._game_started = True
+        logging.info("Chess GUI started successfully")
+      except Exception as e:
+        logging.warning(f"Failed to start GUI: {e}")
+        self.gui_manager = None  # Disable GUI on failure
+    
+    # Update GUI with current player and move status
+    if self.gui_manager:
+      try:
+        current_player = pyspiel_state.current_player()
+        player_name = self.player1_name if current_player == 0 else self.player2_name
+        status = f"{player_name} | Move {self._move_number + 1} | Thinking..."
+        self.gui_manager.set_caption(f"Game Arena - {status}")
+        self.gui_manager.update(pyspiel_state.to_string())
+      except Exception as e:
+        logging.warning(f"GUI update failed: {e}")
+    
+    # Check for GUI quit
+    if self.gui_manager and self.gui_manager.check_for_quit():
+      logging.info("GUI quit requested, ending game")
+      return KaggleSpielActionWithExtras(
+          submission=INVALID_ACTION,
+          actionString=None,
+          thoughts="Game ended by user (GUI closed)",
+          status="OK; User quit via GUI",
+          generate_returns=[],
+      )
+    
+    # Call parent implementation
+    result = super().__call__(observation, configuration, **kwargs)
+    
+    # Update move counter and GUI after move
+    if result.submission != INVALID_ACTION and result.submission != ERROR_ACTION_INT:
+      self._move_number += 1
+      
+      # Update GUI with move result
+      if self.gui_manager:
+        try:
+          # Re-parse state after move to show updated board
+          updated_state = pyspiel_state.clone()
+          if result.actionString:
+            try:
+              action_int = updated_state.string_to_action(result.actionString)
+              updated_state.apply_action(action_int)
+              self.gui_manager.update(updated_state.to_string())
+              
+              # Update caption with move info
+              current_player = pyspiel_state.current_player()
+              player_name = self.player1_name if current_player == 0 else self.player2_name
+              self.gui_manager.set_caption(
+                  f"Game Arena - {player_name} played: {result.actionString} | Move {self._move_number}"
+              )
+            except Exception as e:
+              logging.warning(f"Failed to update GUI with move: {e}")
+        except Exception as e:
+          logging.warning(f"GUI move update failed: {e}")
+    
+    return result
+
+  def terminate_gui(self):
+    """Terminate the GUI if active."""
+    if self.gui_manager:
+      try:
+        self.gui_manager.terminate()
+        logging.info("GUI terminated successfully")
+      except Exception as e:
+        logging.warning(f"GUI termination failed: {e}")
+
+
