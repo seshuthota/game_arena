@@ -19,8 +19,9 @@ from collections.abc import Callable, Mapping, Sequence
 import dataclasses
 import json
 import random
+import time
 import traceback
-from typing import Any, Generic, Protocol, TypeAlias, TypeVar, TypedDict
+from typing import Any, Generic, Protocol, TypeAlias, TypeVar, TypedDict, Optional
 
 from absl import logging
 from game_arena.harness import enhanced_parsers
@@ -153,6 +154,8 @@ class ChessLLMAgent(
       action string returned by the model does not parse to a valid action.
     seed: The seed for the random number generator used for fallbacks.
     num_model_calls: The number of times the model has been called.
+    data_collection_enabled: Whether to emit data collection events.
+    data_collection_callback: Optional callback for data collection events.
   """
 
   def __init__(
@@ -163,6 +166,8 @@ class ChessLLMAgent(
       max_model_calls: int | None = None,
       fallback_to_random_move: bool = False,
       seed: int | None = None,
+      data_collection_enabled: bool = False,
+      data_collection_callback: Optional[Callable[[str, dict], None]] = None,
   ):
     super().__init__()
 
@@ -173,6 +178,11 @@ class ChessLLMAgent(
     self.fallback_to_random_move = fallback_to_random_move
     self._rng = random.Random(seed)
     self._num_model_calls = 0
+    
+    # Data collection configuration
+    self.data_collection_enabled = data_collection_enabled
+    self.data_collection_callback = data_collection_callback
+    self._move_number = 0
 
   @property
   def num_model_calls(self) -> int:
@@ -187,6 +197,10 @@ class ChessLLMAgent(
   ) -> KaggleSpielActionWithExtras:
     """Returns an action given an observation of the current game state."""
     del configuration, kwargs
+    
+    # Start timing for data collection
+    start_time = time.time() if self.data_collection_enabled else None
+    
     serialized_game_and_state = observation.get("serializedGameAndState")
     if not serialized_game_and_state:
       return KaggleSpielActionWithExtras(
@@ -200,6 +214,11 @@ class ChessLLMAgent(
         serialized_game_and_state
     )
 
+    # Capture pre-move state for data collection
+    fen_before = pyspiel_state.to_string() if self.data_collection_enabled else None
+    legal_moves_list = [pyspiel_state.action_to_string(action) 
+                       for action in pyspiel_state.legal_actions()] if self.data_collection_enabled else []
+
     if self.max_model_calls and self.num_model_calls >= self.max_model_calls:
       status = (
           f"MAX MODEL CALLS (N={self.num_model_calls}) REACHED;"
@@ -209,6 +228,15 @@ class ChessLLMAgent(
       legal_moves = observation.get("legalActions") or []
       action_int = self._rng.choice(legal_moves)
       action_str = pyspiel_state.action_to_string(action_int)
+      
+      # Emit data collection event for random move fallback
+      if self.data_collection_enabled and self.data_collection_callback:
+        self._emit_move_data(
+            pyspiel_state, action_int, action_str, "", "", 
+            fen_before, legal_moves_list, start_time, 
+            error_type="max_calls_reached", error_message=status
+        )
+      
       return KaggleSpielActionWithExtras(
           submission=action_int,
           actionString=action_str,
@@ -224,6 +252,10 @@ class ChessLLMAgent(
     action_int = INVALID_ACTION
     response = None
     main_response = None
+    
+    # Time the model call
+    model_call_start = time.time() if self.data_collection_enabled else None
+    
     try:
       logging.info("CALLING LLM")
       self._num_model_calls += 1
@@ -233,9 +265,32 @@ class ChessLLMAgent(
     except Exception as e:  # pylint: disable=broad-except
       logging.error("ERROR CALLING LLM")
       logging.exception(e)
+      
+      # Emit data collection event for model call error
+      if self.data_collection_enabled and self.data_collection_callback:
+        self._emit_move_data(
+            pyspiel_state, INVALID_ACTION, None, prompt, "", 
+            fen_before, legal_moves_list, start_time,
+            model_call_time_ms=(time.time() - model_call_start) * 1000 if model_call_start else 0,
+            error_type="model_call_error", error_message=str(e)
+        )
+      
       pass
+    
+    model_call_time_ms = (time.time() - model_call_start) * 1000 if model_call_start else 0
+    
     if response is None:
       logging.error("NO RESPONSE FROM LLM")
+      
+      # Emit data collection event for no response
+      if self.data_collection_enabled and self.data_collection_callback:
+        self._emit_move_data(
+            pyspiel_state, INVALID_ACTION, None, prompt, "", 
+            fen_before, legal_moves_list, start_time,
+            model_call_time_ms=model_call_time_ms,
+            error_type="no_response", error_message="Model non-responsive"
+        )
+      
       return KaggleSpielActionWithExtras(
           submission=INVALID_ACTION,
           actionString=None,
@@ -244,15 +299,22 @@ class ChessLLMAgent(
           generate_returns=[],
       )
 
+    # Time the parsing
+    parsing_start = time.time() if self.data_collection_enabled else None
+    parsing_success = False
+    
     try:
       main_response = response.main_response
       parsed_action_str = self.response_parser(response, pyspiel_state)
       action_int = pyspiel_state.string_to_action(parsed_action_str)
+      parsing_success = True
       logging.info("PARSED RESPONSE: %s %s", parsed_action_str, action_int)
     except Exception as e:  # pylint: disable=broad-except
       logging.error("ERROR PARSING LLM RESPONSE")
       logging.exception(e)
       pass
+
+    parsing_time_ms = (time.time() - parsing_start) * 1000 if parsing_start else 0
 
     legal_actions = observation.get("legalActions") or []
     if not legal_actions:
@@ -269,6 +331,17 @@ class ChessLLMAgent(
         "Returning: %s %s %s", action_int, parsed_action_str, main_response
     )
 
+    # Emit data collection event for successful move
+    if self.data_collection_enabled and self.data_collection_callback:
+      self._emit_move_data(
+          pyspiel_state, action_int, parsed_action_str, prompt, 
+          main_response or "", fen_before, legal_moves_list, start_time,
+          model_call_time_ms=model_call_time_ms,
+          parsing_time_ms=parsing_time_ms,
+          parsing_success=parsing_success,
+          is_legal=action_int in legal_actions if legal_actions else False
+      )
+
     return KaggleSpielActionWithExtras(
         submission=action_int,
         actionString=parsed_action_str,
@@ -276,6 +349,86 @@ class ChessLLMAgent(
         status=None,
         generate_returns=[response],
     )
+
+  def _emit_move_data(
+      self,
+      pyspiel_state: pyspiel.State,
+      action_int: int,
+      action_str: Optional[str],
+      prompt: str,
+      raw_response: str,
+      fen_before: Optional[str],
+      legal_moves_list: list,
+      start_time: Optional[float],
+      model_call_time_ms: float = 0.0,
+      parsing_time_ms: float = 0.0,
+      parsing_success: bool = False,
+      is_legal: bool = False,
+      error_type: Optional[str] = None,
+      error_message: Optional[str] = None,
+  ) -> None:
+    """Emit move data for collection."""
+    if not self.data_collection_callback:
+      return
+    
+    try:
+      self._move_number += 1
+      
+      # Calculate post-move FEN
+      fen_after = fen_before  # Default to no change
+      if action_int not in [INVALID_ACTION, ERROR_ACTION_INT]:
+        try:
+          new_state = pyspiel_state.clone()
+          new_state.apply_action(action_int)
+          fen_after = new_state.to_string()
+        except Exception:
+          pass  # Keep fen_before as fallback
+      
+      # Calculate total time
+      total_time_ms = (time.time() - start_time) * 1000 if start_time else 0.0
+      
+      # Convert action to UCI format (simplified)
+      move_uci = action_str or ""
+      
+      move_data = {
+        'move_number': self._move_number,
+        'player': pyspiel_state.current_player(),
+        'fen_before': fen_before or "",
+        'fen_after': fen_after or "",
+        'legal_moves': legal_moves_list,
+        'move_san': action_str or "",
+        'move_uci': move_uci,
+        'is_legal': is_legal,
+        'prompt_text': prompt,
+        'raw_response': raw_response,
+        'parsed_move': action_str,
+        'parsing_success': parsing_success,
+        'parsing_attempts': 1,
+        'thinking_time_ms': int(total_time_ms),
+        'api_call_time_ms': int(model_call_time_ms),
+        'parsing_time_ms': int(parsing_time_ms),
+        'rethink_attempts': [],  # ChessLLMAgent doesn't use rethink
+        'error_type': error_type,
+        'error_message': error_message
+      }
+      
+      self.data_collection_callback('move_made', move_data)
+      
+    except Exception as e:
+      logging.warning(f"Failed to emit move data: {e}")
+
+  def enable_data_collection(
+      self, 
+      callback: Callable[[str, dict], None]
+  ) -> None:
+    """Enable data collection with the provided callback."""
+    self.data_collection_enabled = True
+    self.data_collection_callback = callback
+
+  def disable_data_collection(self) -> None:
+    """Disable data collection."""
+    self.data_collection_enabled = False
+    self.data_collection_callback = None
 
 
 # TODO(John Schultz): Remove LLMAgent abstraction in favor of a generic Sampler
@@ -339,6 +492,8 @@ class ChessRethinkAgent(KaggleSpielAgent[KaggleSpielActionWithExtras]):
       max_sampler_calls: int | None = None,
       random_move_fallback: bool = False,
       seed: int | None = None,
+      data_collection_enabled: bool = False,
+      data_collection_callback: Optional[Callable[[str, dict], None]] = None,
   ):
     super().__init__()
     self.sampler = sampler
@@ -347,6 +502,11 @@ class ChessRethinkAgent(KaggleSpielAgent[KaggleSpielActionWithExtras]):
     self.random_move_fallback = random_move_fallback
     self._rng = random.Random(seed)
     self._num_sampler_calls = 0
+    
+    # Data collection configuration
+    self.data_collection_enabled = data_collection_enabled
+    self.data_collection_callback = data_collection_callback
+    self._move_number = 0
 
   @property
   def num_sampler_calls(self) -> int:
@@ -361,6 +521,10 @@ class ChessRethinkAgent(KaggleSpielAgent[KaggleSpielActionWithExtras]):
   ) -> KaggleSpielActionWithExtras:
     """Returns an action given an observation of the current game state."""
     del configuration, kwargs
+    
+    # Start timing for data collection
+    start_time = time.time() if self.data_collection_enabled else None
+    
     serialized_game_and_state = observation.get("serializedGameAndState")
     if not serialized_game_and_state:
       return KaggleSpielActionWithExtras(
@@ -374,6 +538,11 @@ class ChessRethinkAgent(KaggleSpielAgent[KaggleSpielActionWithExtras]):
         serialized_game_and_state
     )
 
+    # Capture pre-move state for data collection
+    fen_before = pyspiel_state.to_string() if self.data_collection_enabled else None
+    legal_moves_list = [pyspiel_state.action_to_string(action) 
+                       for action in pyspiel_state.legal_actions()] if self.data_collection_enabled else []
+
     if (
         self.max_sampler_calls
         and self.num_sampler_calls >= self.max_sampler_calls
@@ -386,6 +555,15 @@ class ChessRethinkAgent(KaggleSpielAgent[KaggleSpielActionWithExtras]):
       legal_moves = observation.get("legalActions") or []
       action_int = self._rng.choice(legal_moves)
       action_str = pyspiel_state.action_to_string(action_int)
+      
+      # Emit data collection event for random move fallback
+      if self.data_collection_enabled and self.data_collection_callback:
+        self._emit_move_data(
+            pyspiel_state, action_int, action_str, "", "", 
+            fen_before, legal_moves_list, start_time, [],
+            error_type="max_calls_reached", error_message=status
+        )
+      
       return KaggleSpielActionWithExtras(
           submission=action_int,
           actionString=action_str,
@@ -414,6 +592,24 @@ class ChessRethinkAgent(KaggleSpielAgent[KaggleSpielActionWithExtras]):
         ],
     }
 
+    # Generate initial prompt for data collection
+    initial_prompt = ""
+    if self.data_collection_enabled:
+      try:
+        prompt_generator = prompt_generation.PromptGeneratorText()
+        prompt_obj = prompt_generator.generate_prompt_with_text_only(
+            prompt_template=self.prompt_template,
+            game_short_name="chess",
+            **prompt_substitutions,
+        )
+        initial_prompt = prompt_obj.prompt_text
+      except Exception as e:
+        logging.warning(f"Failed to generate prompt for data collection: {e}")
+
+    # Time the sampler call
+    sampler_call_start = time.time() if self.data_collection_enabled else None
+    sampler_output = None
+    
     try:
       logging.info("CALLING SAMPLER")
       self._num_sampler_calls += 1
@@ -429,6 +625,17 @@ class ChessRethinkAgent(KaggleSpielAgent[KaggleSpielActionWithExtras]):
     except Exception as e:  # pylint: disable=broad-except
       logging.error("ERROR CALLING SAMPLER")
       logging.exception(e)
+      
+      # Emit data collection event for sampler error
+      if self.data_collection_enabled and self.data_collection_callback:
+        sampler_call_time_ms = (time.time() - sampler_call_start) * 1000 if sampler_call_start else 0
+        self._emit_move_data(
+            pyspiel_state, ERROR_ACTION_INT, None, initial_prompt, "", 
+            fen_before, legal_moves_list, start_time, [],
+            model_call_time_ms=sampler_call_time_ms,
+            error_type="sampler_error", error_message=str(e)
+        )
+      
       return KaggleSpielActionWithExtras(
           submission=ERROR_ACTION_INT,
           actionString=None,
@@ -436,6 +643,13 @@ class ChessRethinkAgent(KaggleSpielAgent[KaggleSpielActionWithExtras]):
           status=f"{type(e).__name__}: {str(e)}\n{traceback.format_exc()}",
           generate_returns=[],
       )
+
+    sampler_call_time_ms = (time.time() - sampler_call_start) * 1000 if sampler_call_start else 0
+
+    # Extract rethink attempts for data collection
+    rethink_attempts = []
+    if self.data_collection_enabled and sampler_output:
+      rethink_attempts = self._extract_rethink_attempts(sampler_output)
 
     main_response = ""
     for i, generate_return in enumerate(sampler_output.generate_returns):
@@ -464,6 +678,17 @@ class ChessRethinkAgent(KaggleSpielAgent[KaggleSpielActionWithExtras]):
       try:
         action_int = pyspiel_state.string_to_action(parsed_action_str)
         logging.info("PARSED RESPONSE: %s %s", parsed_action_str, action_int)
+        
+        # Emit data collection event for successful move
+        if self.data_collection_enabled and self.data_collection_callback:
+          self._emit_move_data(
+              pyspiel_state, action_int, parsed_action_str, initial_prompt, 
+              main_response, fen_before, legal_moves_list, start_time, rethink_attempts,
+              model_call_time_ms=sampler_call_time_ms,
+              parsing_success=True,
+              is_legal=True
+          )
+        
         return KaggleSpielActionWithExtras(
             submission=action_int,
             actionString=parsed_action_str,
@@ -474,6 +699,18 @@ class ChessRethinkAgent(KaggleSpielAgent[KaggleSpielActionWithExtras]):
       except Exception as e:  # pylint: disable=broad-except
         logging.error("ERROR SHOULD BE LEGAL BUT CONVERSION FAILED")
         logging.exception(e)
+        
+        # Emit data collection event for conversion error
+        if self.data_collection_enabled and self.data_collection_callback:
+          self._emit_move_data(
+              pyspiel_state, INVALID_ACTION, parsed_action_str, initial_prompt, 
+              main_response, fen_before, legal_moves_list, start_time, rethink_attempts,
+              model_call_time_ms=sampler_call_time_ms,
+              parsing_success=False,
+              is_legal=False,
+              error_type="conversion_error", error_message=str(e)
+          )
+        
         return KaggleSpielActionWithExtras(
             submission=INVALID_ACTION,
             actionString=parsed_action_str,
@@ -482,6 +719,16 @@ class ChessRethinkAgent(KaggleSpielAgent[KaggleSpielActionWithExtras]):
             generate_returns=generate_returns_jsons,
         )
     else:
+      # Emit data collection event for invalid move
+      if self.data_collection_enabled and self.data_collection_callback:
+        self._emit_move_data(
+            pyspiel_state, INVALID_ACTION, parsed_action_str, initial_prompt, 
+            main_response, fen_before, legal_moves_list, start_time, rethink_attempts,
+            model_call_time_ms=sampler_call_time_ms,
+            parsing_success=True,  # Parsing succeeded but move was invalid
+            is_legal=False
+        )
+      
       return KaggleSpielActionWithExtras(
           submission=INVALID_ACTION,
           actionString=parsed_action_str,
@@ -489,6 +736,136 @@ class ChessRethinkAgent(KaggleSpielAgent[KaggleSpielActionWithExtras]):
           status="OK; Submitting invalid action.",
           generate_returns=generate_returns_jsons,
       )
+
+  def _extract_rethink_attempts(self, sampler_output) -> list:
+    """Extract rethink attempts from sampler output."""
+    rethink_attempts = []
+    
+    try:
+      # Extract rethink data from generate_returns (skip first one which is initial attempt)
+      for i, generate_return in enumerate(sampler_output.generate_returns[1:], 1):
+        rethink_attempt = {
+          'attempt_number': i,
+          'prompt_text': f"Rethink prompt {i} (not captured)",  # Not directly available
+          'raw_response': generate_return.main_response if hasattr(generate_return, 'main_response') else str(generate_return),
+          'parsed_move': None,  # Would need additional parsing
+          'was_legal': False,  # Would need validation
+          'timestamp': time.time()
+        }
+        rethink_attempts.append(rethink_attempt)
+      
+      # Try to extract additional data from auxiliary outputs if available
+      if hasattr(sampler_output, 'auxiliary_outputs') and sampler_output.auxiliary_outputs:
+        aux_outputs = sampler_output.auxiliary_outputs
+        attempt_number = 1
+        
+        while f'parsed_action_attempt_{attempt_number}' in aux_outputs:
+          if attempt_number <= len(rethink_attempts):
+            # Update existing attempt with parsed data
+            rethink_attempts[attempt_number - 1]['parsed_move'] = aux_outputs.get(f'parsed_action_attempt_{attempt_number}')
+            rethink_attempts[attempt_number - 1]['was_legal'] = aux_outputs.get(f'maybe_legal_action_attempt_{attempt_number}') is not None
+            
+            # Try to get rethink prompt if available
+            rethink_prompt = aux_outputs.get(f'rethink_prompt_attempt_{attempt_number}')
+            if rethink_prompt:
+              rethink_attempts[attempt_number - 1]['prompt_text'] = rethink_prompt
+          
+          attempt_number += 1
+      
+    except Exception as e:
+      logging.warning(f"Failed to extract rethink attempts: {e}")
+    
+    return rethink_attempts
+
+  def _emit_move_data(
+      self,
+      pyspiel_state: pyspiel.State,
+      action_int: int,
+      action_str: Optional[str],
+      prompt: str,
+      raw_response: str,
+      fen_before: Optional[str],
+      legal_moves_list: list,
+      start_time: Optional[float],
+      rethink_attempts: list,
+      model_call_time_ms: float = 0.0,
+      parsing_time_ms: float = 0.0,
+      parsing_success: bool = False,
+      is_legal: bool = False,
+      error_type: Optional[str] = None,
+      error_message: Optional[str] = None,
+  ) -> None:
+    """Emit move data for collection."""
+    if not self.data_collection_callback:
+      return
+    
+    try:
+      self._move_number += 1
+      
+      # Calculate post-move FEN
+      fen_after = fen_before  # Default to no change
+      if action_int not in [INVALID_ACTION, ERROR_ACTION_INT]:
+        try:
+          new_state = pyspiel_state.clone()
+          new_state.apply_action(action_int)
+          fen_after = new_state.to_string()
+        except Exception:
+          pass  # Keep fen_before as fallback
+      
+      # Calculate total time
+      total_time_ms = (time.time() - start_time) * 1000 if start_time else 0.0
+      
+      # Convert action to UCI format (simplified)
+      move_uci = action_str or ""
+      
+      move_data = {
+        'move_number': self._move_number,
+        'player': pyspiel_state.current_player(),
+        'fen_before': fen_before or "",
+        'fen_after': fen_after or "",
+        'legal_moves': legal_moves_list,
+        'move_san': action_str or "",
+        'move_uci': move_uci,
+        'is_legal': is_legal,
+        'prompt_text': prompt,
+        'raw_response': raw_response,
+        'parsed_move': action_str,
+        'parsing_success': parsing_success,
+        'parsing_attempts': len(rethink_attempts) + 1,  # Include initial attempt
+        'thinking_time_ms': int(total_time_ms),
+        'api_call_time_ms': int(model_call_time_ms),
+        'parsing_time_ms': int(parsing_time_ms),
+        'rethink_attempts': rethink_attempts,
+        'error_type': error_type,
+        'error_message': error_message
+      }
+      
+      self.data_collection_callback('move_made', move_data)
+      
+      # Emit individual rethink attempt events
+      for attempt in rethink_attempts:
+        self.data_collection_callback('rethink_attempt', {
+          'game_id': None,  # Will be set by the callback handler
+          'move_number': self._move_number,
+          'player': pyspiel_state.current_player(),
+          'attempt_data': attempt
+        })
+      
+    except Exception as e:
+      logging.warning(f"Failed to emit move data: {e}")
+
+  def enable_data_collection(
+      self, 
+      callback: Callable[[str, dict], None]
+  ) -> None:
+    """Enable data collection with the provided callback."""
+    self.data_collection_enabled = True
+    self.data_collection_callback = callback
+
+  def disable_data_collection(self) -> None:
+    """Disable data collection."""
+    self.data_collection_enabled = False
+    self.data_collection_callback = None
 
 
 def build_default_rethink_agent(

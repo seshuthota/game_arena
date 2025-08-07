@@ -57,6 +57,7 @@ class EnhancedChessParser(parsers.TextParser):
     # Enhanced parsing for problematic responses
     text = parser_input.text.strip()
     logging.info(f"Enhanced parser: processing '{text[:100]}...'")
+    logging.info(f"Enhanced parser: legal moves available: {parser_input.legal_moves[:10]}{'...' if len(parser_input.legal_moves) > 10 else ''}")
 
     # Step 1: Remove common LLM response prefixes
     cleaned_text = self._remove_common_prefixes(text)
@@ -90,6 +91,13 @@ class EnhancedChessParser(parsers.TextParser):
       if result:
         logging.info(f"Enhanced parser: regex extraction succeeded with '{result}' from '{move}'")
         return result
+
+    # Step 4: Direct legal move matching (case-insensitive)
+    text_upper = text.upper()
+    for legal_move in parser_input.legal_moves:
+      if legal_move.upper() in text_upper:
+        logging.info(f"Enhanced parser: direct legal move match found: '{legal_move}'")
+        return legal_move
 
     logging.warning(f"Enhanced parser: failed to extract move from '{text[:200]}...'")
     return None

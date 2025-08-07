@@ -51,6 +51,16 @@ dev = [
   "pyink",
 ]
 
+# PostgreSQL backend support
+postgresql = [
+  "asyncpg>=0.28.0",
+]
+
+# All optional dependencies
+all = [
+  "asyncpg>=0.28.0",
+]
+
 [tool.pyink]
 # Formatting configuration to follow Google style-guide
 line-length = 80
