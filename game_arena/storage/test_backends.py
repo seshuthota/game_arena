@@ -174,7 +174,7 @@ class TestStorageBackendInterface:
         expected_methods = {
             'connect', 'disconnect', 'initialize_schema',
             'create_game', 'get_game', 'update_game', 'delete_game',
-            'add_move', 'get_moves', 'get_move',
+            'add_move', 'get_moves', 'get_move', 'update_move', 'add_rethink_attempt',
             'update_player_stats', 'get_player_stats',
             'query_games', 'count_games',
             'cleanup_old_data', 'get_storage_stats'

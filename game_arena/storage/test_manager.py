@@ -164,6 +164,36 @@ class MockStorageBackend(StorageBackend):
             'total_moves': sum(len(moves) for moves in self.moves.values()),
             'total_players': len(self.player_stats)
         }
+    
+    async def update_move(self, move: MoveRecord) -> bool:
+        """Update an existing move record."""
+        self._check_failure("update_move")
+        if move.game_id not in self.moves:
+            return False
+        
+        # Find and update the move
+        for i, existing_move in enumerate(self.moves[move.game_id]):
+            if (existing_move.move_number == move.move_number and 
+                existing_move.player == move.player):
+                self.moves[move.game_id][i] = move
+                return True
+        return False
+    
+    async def add_rethink_attempt(self, game_id: str, move_number: int, 
+                                 player: int, rethink_attempt) -> bool:
+        """Add a rethink attempt record."""
+        self._check_failure("add_rethink_attempt")
+        if game_id not in self.moves:
+            return False
+        
+        # Find the move and add the rethink attempt
+        for move in self.moves[game_id]:
+            if move.move_number == move_number and move.player == player:
+                if move.rethink_attempts is None:
+                    move.rethink_attempts = []
+                move.rethink_attempts.append(rethink_attempt)
+                return True
+        return False
 
 
 @pytest.fixture

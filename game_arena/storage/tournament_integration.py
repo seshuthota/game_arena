@@ -122,7 +122,7 @@ class TournamentDataCollector:
             # Initialize game data collector
             collector_config = CollectorConfig(
                 enabled=True,
-                async_processing=self.config.async_processing,
+                async_processing=True,  # Always use async processing for better performance
                 worker_threads=self.config.worker_threads,
                 max_collection_latency_ms=self.config.max_collection_latency_ms,
                 collect_rethink_data=self.config.collect_rethink
@@ -144,7 +144,7 @@ class TournamentDataCollector:
                 await self.game_collector.shutdown()
             
             if self.storage_manager:
-                await self.storage_manager.close()
+                await self.storage_manager.shutdown()
             
             # Log tournament summary
             duration = (datetime.now() - self.tournament_start_time).total_seconds() if self.tournament_start_time else 0

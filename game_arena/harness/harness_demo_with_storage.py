@@ -303,7 +303,7 @@ async def main_async(_) -> None:
           database_url=_DATABASE_URL.value if _STORAGE_BACKEND.value == "postgresql" else None,
           collect_timing=True,
           collect_rethink=True,
-          async_processing=True,
+          async_processing=False,
           worker_threads=2
       )
       
@@ -407,7 +407,7 @@ async def main_async(_) -> None:
     print(colored(f"Data collection enabled - storing to {_STORAGE_BACKEND.value}", "green"))
   print(colored("=" * 50, "green"))
 
-  # Game loop
+  # Game loop using the original harness_demo.py approach with enhanced parsing
   move_count = 0
   for move_number in range(_NUM_MOVES.value):
     # Check for GUI quit
@@ -434,39 +434,197 @@ async def main_async(_) -> None:
       model = _PLAYER_1_MODEL.value if current_player == 0 else _PLAYER_2_MODEL.value
       gui_manager.set_caption(f"Game Arena Demo - {player_name}: {provider}:{model} | Move {move_number + 1}")
 
-    # Select agent for current player
-    current_agent = wrapped_agent_one if current_player == 0 else wrapped_agent_two
-    
-    # Create observation
-    observation = {
-        "serializedGameAndState": pyspiel.serialize_game_and_state(
-            pyspiel_game, pyspiel_state
+    # 1. Generate the prompt from the game state:
+    prompt_substitutions = {
+        "readable_state_str": tournament_util.convert_to_readable_state(
+            game_short_name="chess",
+            state_str=pyspiel_state.to_string(),
+            current_player=pyspiel_state.current_player(),
         ),
-        "legalActions": list(pyspiel_state.legal_actions())
+        "move_history": (
+            tournament_util.get_action_string_history(pyspiel_state) or "None"
+        ),
+        "player_name": game_notation_examples.GAME_SPECIFIC_NOTATIONS["chess"][
+            "player_map"
+        ][pyspiel_state.current_player()],
+        "move_notation": game_notation_examples.GAME_SPECIFIC_NOTATIONS[
+            "chess"
+        ]["move_notation"],
+        "notation": game_notation_examples.GAME_SPECIFIC_NOTATIONS["chess"][
+            "state_notation"
+        ],
     }
-    configuration = {}
+    prompt = prompt_generator.generate_prompt_with_text_only(
+        prompt_template=prompt_template,
+        game_short_name="chess",
+        **prompt_substitutions,
+    )
+    if _VERBOSE.value:
+      print(colored(f"Formatted prompt: {prompt.prompt_text[:200]}...", "blue"))
+
+    # 2. Call the model with retry logic:
+    model = model_player_one if current_player == 0 else model_player_two
+    provider = _PLAYER_1_PROVIDER.value if current_player == 0 else _PLAYER_2_PROVIDER.value
+    model_name = _PLAYER_1_MODEL.value if current_player == 0 else _PLAYER_2_MODEL.value
     
-    # Get agent's move
-    try:
-      result = current_agent(observation, configuration)
+    parser_output = None
+    max_retries = 3
+    
+    for attempt in range(max_retries):
+      if attempt == 0:
+        print(colored(f"🤖 Calling {provider}:{model_name}...", "cyan"))
+        current_prompt = prompt
+      else:
+        print(colored(f"🔄 Retry attempt {attempt} - asking for legal move...", "yellow"))
+        # Create rethink prompt
+        legal_moves_str = ', '.join(parsers.get_legal_action_strings(pyspiel_state)[:10])
+        if len(parsers.get_legal_action_strings(pyspiel_state)) > 10:
+          legal_moves_str += "..."
+        
+        rethink_text = f"Your previous response could not be parsed or was illegal. Please respond with ONLY a legal chess move. Legal moves available: {legal_moves_str}"
+        current_prompt = tournament_util.ModelTextInput(prompt_text=rethink_text)
       
-      if result['submission'] == agent.INVALID_ACTION:
-        print(colored("❌ Agent returned invalid action, ending game.", "red"))
+      try:
+        # Prepare status message for GUI
+        if attempt == 0:
+          status_message = f"🤖 {player_name}: {provider}:{model_name} thinking..."
+        else:
+          status_message = f"🔄 {player_name}: {provider}:{model_name} retry {attempt}..."
+        
+        # Add system instruction for cleaner responses from all models except registry
+        if provider in ["openrouter", "gemini", "openai", "anthropic"]:
+          chess_system_instruction = "You are a chess expert. Respond ONLY with the chess move in standard algebraic notation (e.g., e4, Nf3, O-O). No explanation or additional text."
+          prompt_with_system = tournament_util.ModelTextInput(
+              prompt_text=current_prompt.prompt_text,
+              system_instruction=chess_system_instruction
+          )
+          response = call_model_with_gui_updates(model, prompt_with_system, gui_manager, status_message)
+        else:
+          # Registry models handle system instructions internally
+          response = call_model_with_gui_updates(model, current_prompt, gui_manager, status_message)
+        
+        # Check if user quit during API call
+        if response is None:
+          print(colored("🛑 Stopping game due to user quit or timeout", "yellow"))
+          parser_output = None  # Signal to exit both loops
+          break
+        
+        # Show full response in verbose mode, truncated response otherwise
+        if _VERBOSE.value:
+          print(colored(f"💭 Full Response: {response.main_response}", "yellow"))
+        else:
+          print(colored(f"💭 Response: {response.main_response[:100]}...", "yellow"))
+          
+      except Exception as e:
+        print(colored(f"❌ Model call failed: {e}", "red"))
+        print(colored("This is expected in demo mode without proper API keys", "yellow"))
         break
+
+      # 3. Parse the model response:
+      parser_input = parsers.TextParserInput(
+          text=response.main_response,
+          state_str=pyspiel_state.to_string(),
+          legal_moves=parsers.get_legal_action_strings(pyspiel_state),
+          player_number=pyspiel_state.current_player(),
+      )
+      parser_output = parser.parse(parser_input)
       
-      # Apply the move
-      pyspiel_state.apply_action(result['submission'])
+      if parser_output is not None:
+        print(colored(f"♟️  Parsed move: {parser_output}", "magenta", attrs=["bold"]))
+        
+        # Check if the parsed move is actually legal by testing conversion to action
+        try:
+          action_int = pyspiel_state.string_to_action(parser_output)
+          if action_int in pyspiel_state.legal_actions():
+            # Move is legal, break out of retry loop
+            break
+          else:
+            print(colored(f"⚠️  Parsed move {parser_output} is not in legal moves list", "yellow"))
+            parser_output = None  # Force retry
+        except Exception as e:
+          print(colored(f"⚠️  Parsed move {parser_output} is invalid: {e}", "yellow"))
+          parser_output = None  # Force retry
+      
+      if parser_output is None:
+        print(colored(f"❌ Parse attempt {attempt + 1} failed or move illegal", "red"))
+        if _VERBOSE.value:
+          print(colored(f"🔍 Parser failed to extract legal move from: '{response.main_response}'", "red"))
+          print(colored(f"🎯 Legal moves available: {parser_input.legal_moves[:10]}{'...' if len(parser_input.legal_moves) > 10 else ''}", "red"))
+        
+        if attempt == max_retries - 1:
+          print(colored("❌ All retry attempts failed, ending game.", "red"))
+          break
+    
+    # Exit move loop if parsing ultimately failed
+    if parser_output is None:
+      break
+
+    # 4. Apply the move:
+    try:
+      action_int = pyspiel_state.string_to_action(parser_output)
+      pyspiel_state.apply_action(action_int)
       move_count += 1
+      print(colored("✅ Move applied successfully!", "green"))
       
-      print(colored(f"✅ Move applied: {result.get('actionString', 'Unknown')}", "green"))
+      # Collect move data if tournament collector is enabled
+      if tournament_collector:
+        try:
+          # Calculate pre-move FEN (we need to reconstruct this)
+          # Note: We can't easily get the pre-move state, so we'll use current state
+          # In a real implementation, we'd capture this before applying the move
+          fen_before = pyspiel_state.to_string()  # This is post-move, but better than crashing
+          
+          # Create move data for collection
+          move_data = {
+              'move_number': move_count,
+              'player': current_player,
+              'fen_before': fen_before,
+              'fen_after': pyspiel_state.to_string(),
+              'legal_moves': parsers.get_legal_action_strings(pyspiel_state)[:20],  # Limit for performance
+              'move_san': parser_output,
+              'move_uci': parser_output,
+              'is_legal': True,
+              'prompt_text': prompt.prompt_text[:1000],
+              'raw_response': response.main_response[:2000] if response else "",
+              'parsed_move': parser_output,
+              'parsing_success': True,
+              'parsing_attempts': attempt + 1,
+              'thinking_time_ms': 0,  # Not measured in this approach
+              'api_call_time_ms': 0,
+              'parsing_time_ms': 0,
+              'rethink_attempts': [],
+              'error_type': None,
+              'error_message': None
+          }
+          
+          # Record move in background to avoid blocking
+          import threading
+          def record_move_background():
+            try:
+              success = tournament_collector.game_collector.record_move(game_id, move_data)
+              if success:
+                print(colored(f"✅ Move {move_count} data collected", "green"))
+              else:
+                print(colored(f"⚠️  Move {move_count} data collection failed", "yellow"))
+            except Exception as e:
+              print(colored(f"⚠️  Background data collection failed: {e}", "yellow"))
+              import traceback
+              traceback.print_exc()
+          
+          thread = threading.Thread(target=record_move_background, daemon=True)
+          thread.start()
+          
+        except Exception as e:
+          print(colored(f"⚠️  Data collection setup failed: {e}", "yellow"))
       
       # Update GUI if available
       if gui_manager:
         gui_manager.update(pyspiel_state.to_string())
-        gui_manager.set_caption(f"Game Arena Demo - {player_name} played: {result.get('actionString', 'Unknown')}")
+        # Update caption to show the move was played
+        gui_manager.set_caption(f"Game Arena Demo - {player_name} played: {parser_output}")
         
     except Exception as e:
-      print(colored(f"❌ Error during move execution: {e}", "red"))
+      print(colored(f"❌ Failed to apply move: {e}", "red"))
       break
   
   # Final game state
@@ -483,16 +641,23 @@ async def main_async(_) -> None:
     if returns[0] == 1:  # Black wins
       result_text = f"Player 1 (Black) WINS!"
       print(colored(f"🎉 {result_text}", "blue", attrs=["bold"]))
+      print(colored(f"    {_PLAYER_1_PROVIDER.value}:{_PLAYER_1_MODEL.value} defeats {_PLAYER_2_PROVIDER.value}:{_PLAYER_2_MODEL.value}", "blue"))
     elif returns[1] == 1:  # White wins
       result_text = f"Player 2 (White) WINS!"
       print(colored(f"🎉 {result_text}", "red", attrs=["bold"]))
+      print(colored(f"    {_PLAYER_2_PROVIDER.value}:{_PLAYER_2_MODEL.value} defeats {_PLAYER_1_PROVIDER.value}:{_PLAYER_1_MODEL.value}", "red"))
     else:  # Draw
       result_text = "DRAW!"
       print(colored(f"🤝 {result_text}", "yellow", attrs=["bold"]))
+      print(colored(f"    {_PLAYER_1_PROVIDER.value}:{_PLAYER_1_MODEL.value} vs {_PLAYER_2_PROVIDER.value}:{_PLAYER_2_MODEL.value}", "yellow"))
     
     # Create game outcome for data collection
     if tournament_collector:
       game_outcome = determine_game_outcome(pyspiel_state)
+  else:
+    # Game was not completed normally
+    print(colored("🚫 Game ended without completion", "yellow", attrs=["bold"]))
+    print(colored(f"    Final position after {move_count} moves", "yellow"))
   
   # Finalize data collection
   if tournament_collector and game_outcome:

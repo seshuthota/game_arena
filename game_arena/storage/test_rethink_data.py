@@ -134,8 +134,16 @@ class TestRethinkDataCapture:
                 timestamp=datetime.now()
             )
     
-    async def test_collector_record_rethink_attempt_success(self, collector):
+    async def test_collector_record_rethink_attempt_success(self, mock_storage_manager):
         """Test successful rethink attempt recording."""
+        # Create a real collector for this test (not mocked)
+        config = CollectorConfig(
+            enabled=True,
+            collect_rethink_data=True,
+            async_processing=False  # Use sync for easier testing
+        )
+        real_collector = GameDataCollector(mock_storage_manager, config)
+        
         game_id = "test_rethink_game"
         move_number = 1
         player = 1
@@ -148,10 +156,11 @@ class TestRethinkDataCapture:
             'was_legal': True
         }
         
-        result = collector.record_rethink_attempt(game_id, move_number, player, attempt_data)
+        result = real_collector.record_rethink_attempt(game_id, move_number, player, attempt_data)
         
         assert result is True
-        assert collector._stats.events_received == 1
+        # With sync processing, the event should be processed immediately
+        assert real_collector._stats.events_received == 1
     
     async def test_collector_record_rethink_attempt_disabled(self, mock_storage_manager):
         """Test rethink attempt recording when disabled."""
@@ -403,18 +412,16 @@ class TestRethinkDataCapture:
         config = StorageConfig(database=db_config)
         manager = StorageManager(mock_storage_manager, config)
         
-        # Test empty prompt_text
-        invalid_attempt = RethinkAttempt(
-            attempt_number=1,
-            prompt_text="",  # Empty prompt
-            raw_response="response",
-            parsed_move="e4",
-            was_legal=True,
-            timestamp=datetime.now()
-        )
-        
-        with pytest.raises(ValidationError, match="Rethink attempt prompt_text cannot be empty"):
-            await manager.add_rethink_attempt("game_1", 1, 1, invalid_attempt)
+        # Test empty prompt_text - this should fail at model level first
+        with pytest.raises(ValueError, match="prompt_text cannot be empty"):
+            invalid_attempt = RethinkAttempt(
+                attempt_number=1,
+                prompt_text="",  # Empty prompt
+                raw_response="response",
+                parsed_move="e4",
+                was_legal=True,
+                timestamp=datetime.now()
+            )
     
     def test_agent_wrapper_individual_rethink_recording(self, collector, player_info, mock_rethink_agent, game_state):
         """Test that individual rethink attempts are recorded separately."""
@@ -470,7 +477,7 @@ class TestRethinkDataCapture:
         call_args = collector.record_rethink_attempt.call_args
         assert call_args[0][0] == "test_individual_recording"  # game_id
         assert call_args[0][1] == 1  # move_number
-        assert call_args[0][2] == 0  # player (current player from state)
+        assert call_args[0][2] == 1  # player (current player from state - white to move initially)
         
         attempt_data = call_args[0][3]
         assert attempt_data['attempt_number'] == 1

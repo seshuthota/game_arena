@@ -205,25 +205,25 @@ class DataCollectingAgent(KaggleSpielAgent[KaggleSpielActionWithExtras]):
                             }
                         )
                 
-                # Collect move data
+                # Collect move data (minimize processing time)
                 move_data = {
                     'move_number': self._move_number,
                     'player': player_index,
                     'fen_before': fen_before,
                     'fen_after': fen_after,
-                    'legal_moves': legal_moves,
+                    'legal_moves': legal_moves[:20],  # Limit to first 20 legal moves to reduce data size
                     'move_san': result.get('actionString', '') or "",
-                    'move_uci': self._convert_to_uci(pyspiel_state, result),
+                    'move_uci': result.get('actionString', '') or "",  # Simplified - avoid expensive conversion
                     'is_legal': result['submission'] in pyspiel_state.legal_actions(),
-                    'prompt_text': prompt_text,
-                    'raw_response': raw_response,
+                    'prompt_text': prompt_text[:1000] if prompt_text else "",  # Truncate long prompts
+                    'raw_response': raw_response[:2000] if raw_response else "",  # Truncate long responses
                     'parsed_move': result.get('actionString'),
                     'parsing_success': result['submission'] != INVALID_ACTION,
-                    'parsing_attempts': 1,  # Could be enhanced based on agent type
+                    'parsing_attempts': 1,
                     'thinking_time_ms': int(timing.total_time_ms),
                     'api_call_time_ms': int(timing.api_call_time_ms),
                     'parsing_time_ms': int(timing.parsing_time_ms),
-                    'rethink_attempts': rethink_attempts,
+                    'rethink_attempts': rethink_attempts[:5] if rethink_attempts else [],  # Limit rethink attempts
                     'error_type': self._extract_error_type(result),
                     'error_message': self._extract_error_message(result)
                 }
@@ -482,9 +482,18 @@ class DataCollectingAgent(KaggleSpielAgent[KaggleSpielActionWithExtras]):
         """Record move data asynchronously."""
         try:
             if self.game_id:
-                self.collector.record_move(self.game_id, move_data)
+                # Use a separate thread to avoid blocking game execution
+                import threading
+                def record_in_background():
+                    try:
+                        self.collector.record_move(self.game_id, move_data)
+                    except Exception as e:
+                        self.logger.error(f"Background move recording failed: {e}")
+                
+                thread = threading.Thread(target=record_in_background, daemon=True)
+                thread.start()
         except Exception as e:
-            self.logger.error(f"Failed to record move data: {e}")
+            self.logger.error(f"Failed to start move recording thread: {e}")
     
     def _monitor_collection_performance(self, collection_time_ms: float) -> None:
         """Monitor data collection performance."""
