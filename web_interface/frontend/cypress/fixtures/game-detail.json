@@ -1,0 +1,107 @@
+{
+  "success": true,
+  "timestamp": "2024-01-01T12:00:00Z",
+  "game": {
+    "game_id": "game_1",
+    "tournament_id": "tournament_1",
+    "start_time": "2024-01-01T10:00:00Z",
+    "end_time": "2024-01-01T11:00:00Z",
+    "players": {
+      "0": {
+        "player_id": "player_1",
+        "model_name": "gpt-4",
+        "model_provider": "openai",
+        "agent_type": "ChessLLMAgent",
+        "elo_rating": 1200
+      },
+      "1": {
+        "player_id": "player_2",
+        "model_name": "claude-3",
+        "model_provider": "anthropic",
+        "agent_type": "ChessLLMAgent",
+        "elo_rating": 1250
+      }
+    },
+    "outcome": {
+      "result": "WHITE_WINS",
+      "winner": 0,
+      "termination": "CHECKMATE",
+      "termination_details": null
+    },
+    "total_moves": 4,
+    "duration_minutes": 60,
+    "is_completed": true,
+    "initial_fen": "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
+    "final_fen": "r1bqkb1r/pppp1ppp/2n2n2/4p3/2B1P3/3P1N2/PPP2PPP/RNBQK2R w KQkq - 4 4",
+    "moves": [
+      {
+        "move_number": 1,
+        "player": 0,
+        "move_notation": "e4",
+        "fen_before": "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
+        "fen_after": "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq e3 0 1",
+        "is_legal": true,
+        "parsing_success": true,
+        "thinking_time_ms": 1200,
+        "api_call_time_ms": 800,
+        "total_time_ms": 2000,
+        "had_rethink": false,
+        "rethink_attempts": 0,
+        "blunder_flag": false,
+        "move_quality_score": 0.8,
+        "llm_response": "I will play e4 to control the center."
+      },
+      {
+        "move_number": 1,
+        "player": 1,
+        "move_notation": "e5",
+        "fen_before": "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq e3 0 1",
+        "fen_after": "rnbqkbnr/pppp1ppp/8/4p3/4P3/8/PPPP1PPP/RNBQKBNR w KQkq e6 0 2",
+        "is_legal": true,
+        "parsing_success": true,
+        "thinking_time_ms": 1500,
+        "api_call_time_ms": 700,
+        "total_time_ms": 2200,
+        "had_rethink": false,
+        "rethink_attempts": 0,
+        "blunder_flag": false,
+        "move_quality_score": 0.85,
+        "llm_response": "I'll respond with e5 to challenge the center."
+      },
+      {
+        "move_number": 2,
+        "player": 0,
+        "move_notation": "Bc4",
+        "fen_before": "rnbqkbnr/pppp1ppp/8/4p3/4P3/8/PPPP1PPP/RNBQKBNR w KQkq e6 0 2",
+        "fen_after": "rnbqkbnr/pppp1ppp/8/4p3/2B1P3/8/PPPP1PPP/RNBQK1NR b KQkq - 1 2",
+        "is_legal": true,
+        "parsing_success": true,
+        "thinking_time_ms": 1800,
+        "api_call_time_ms": 900,
+        "total_time_ms": 2700,
+        "had_rethink": false,
+        "rethink_attempts": 0,
+        "blunder_flag": false,
+        "move_quality_score": 0.7,
+        "llm_response": "I'll develop my bishop with Bc4, targeting f7."
+      },
+      {
+        "move_number": 2,
+        "player": 1,
+        "move_notation": "Nc6",
+        "fen_before": "rnbqkbnr/pppp1ppp/8/4p3/2B1P3/8/PPPP1PPP/RNBQK1NR b KQkq - 1 2",
+        "fen_after": "r1bqkbnr/pppp1ppp/2n5/4p3/2B1P3/8/PPPP1PPP/RNBQK1NR w KQkq - 2 3",
+        "is_legal": true,
+        "parsing_success": true,
+        "thinking_time_ms": 1400,
+        "api_call_time_ms": 600,
+        "total_time_ms": 2000,
+        "had_rethink": false,
+        "rethink_attempts": 0,
+        "blunder_flag": false,
+        "move_quality_score": 0.75,
+        "llm_response": "I'll develop my knight with Nc6."
+      }
+    ]
+  }
+}

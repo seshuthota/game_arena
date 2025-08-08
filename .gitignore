@@ -36,3 +36,20 @@ docs/api
 
 .kiro/*
 .claude/*
+
+# Web interface
+web_interface/frontend/node_modules/
+web_interface/frontend/build/
+web_interface/frontend/coverage/
+web_interface/backend/.coverage
+web_interface/backend/server.log
+*.db
+
+# Editor files
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db

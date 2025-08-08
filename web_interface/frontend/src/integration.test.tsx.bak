@@ -1,0 +1,407 @@
+import React from 'react';
+import { render, screen, waitFor, fireEvent } from '@testing-library/react';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { BrowserRouter } from 'react-router-dom';
+import { http, HttpResponse } from 'msw';
+import { setupServer } from 'msw/node';
+
+import GameListView from '../components/GameListView';
+import GameDetailView from '../components/GameDetailView';
+import StatisticsDashboard from '../components/StatisticsDashboard';
+import LeaderboardView from '../components/LeaderboardView';
+import { ErrorProvider } from '../contexts/ErrorContext';
+
+// Mock API responses
+const mockGamesResponse = {
+  success: true,
+  timestamp: '2024-01-01T12:00:00Z',
+  games: [
+    {
+      game_id: 'game_1',
+      tournament_id: 'tournament_1',
+      start_time: '2024-01-01T10:00:00Z',
+      end_time: '2024-01-01T11:00:00Z',
+      players: {
+        '0': {
+          player_id: 'player_1',
+          model_name: 'gpt-4',
+          model_provider: 'openai',
+          agent_type: 'ChessLLMAgent',
+          elo_rating: 1200
+        },
+        '1': {
+          player_id: 'player_2',
+          model_name: 'claude-3',
+          model_provider: 'anthropic',
+          agent_type: 'ChessLLMAgent',
+          elo_rating: 1250
+        }
+      },
+      outcome: {
+        result: 'WHITE_WINS',
+        winner: 0,
+        termination: 'CHECKMATE',
+        termination_details: null
+      },
+      total_moves: 45,
+      duration_minutes: 60,
+      is_completed: true
+    }
+  ],
+  pagination: {
+    page: 1,
+    limit: 20,
+    total_count: 1,
+    total_pages: 1,
+    has_next: false,
+    has_previous: false
+  },
+  filters_applied: {}
+};
+
+const mockGameDetailResponse = {
+  success: true,
+  timestamp: '2024-01-01T12:00:00Z',
+  game: {
+    ...mockGamesResponse.games[0],
+    initial_fen: 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1',
+    final_fen: 'r1bqkb1r/pppp1ppp/2n2n2/4p3/2B1P3/3P1N2/PPP2PPP/RNBQK2R w KQkq - 4 4',
+    moves: [
+      {
+        move_number: 1,
+        player: 0,
+        move_notation: 'e4',
+        fen_before: 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1',
+        fen_after: 'rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq e3 0 1',
+        is_legal: true,
+        parsing_success: true,
+        thinking_time_ms: 1200,
+        api_call_time_ms: 800,
+        total_time_ms: 2000,
+        had_rethink: false,
+        rethink_attempts: 0,
+        blunder_flag: false,
+        move_quality_score: 0.8,
+        llm_response: 'I will play e4 to control the center.'
+      }
+    ]
+  }
+};
+
+const mockStatisticsResponse = {
+  success: true,
+  timestamp: '2024-01-01T12:00:00Z',
+  statistics: {
+    total_games: 150,
+    total_players: 12,
+    completed_games: 145,
+    average_game_duration_minutes: 45.5,
+    total_moves: 6750,
+    average_moves_per_game: 46.6,
+    white_win_rate: 0.52,
+    black_win_rate: 0.38,
+    draw_rate: 0.10,
+    most_common_termination: 'CHECKMATE',
+    most_active_model: 'gpt-4',
+    blunder_rate: 0.08
+  }
+};
+
+const mockLeaderboardResponse = {
+  success: true,
+  timestamp: '2024-01-01T12:00:00Z',
+  leaderboard: [
+    {
+      rank: 1,
+      player_id: 'player_1',
+      model_name: 'gpt-4',
+      model_provider: 'openai',
+      games_played: 45,
+      wins: 28,
+      losses: 15,
+      draws: 2,
+      win_rate: 0.622,
+      average_game_duration: 42.3,
+      elo_rating: 1350
+    },
+    {
+      rank: 2,
+      player_id: 'player_2',
+      model_name: 'claude-3',
+      model_provider: 'anthropic',
+      games_played: 38,
+      wins: 22,
+      losses: 14,
+      draws: 2,
+      win_rate: 0.579,
+      average_game_duration: 48.7,
+      elo_rating: 1280
+    }
+  ],
+  filters_applied: {
+    sort_by: 'win_rate'
+  }
+};
+
+// Setup MSW server
+const server = setupServer(
+  rest.get('/api/games', (req, res, ctx) => {
+    const page = req.url.searchParams.get('page') || '1';
+    const searchTerm = req.url.searchParams.get('search');
+    
+    // Simulate search filtering
+    if (searchTerm) {
+      const filteredGames = mockGamesResponse.games.filter(game =>
+        game.players['0'].model_name.includes(searchTerm) ||
+        game.players['1'].model_name.includes(searchTerm)
+      );
+      return res(ctx.json({
+        ...mockGamesResponse,
+        games: filteredGames
+      }));
+    }
+    
+    return res(ctx.json(mockGamesResponse));
+  }),
+  
+  rest.get('/api/games/:gameId', (req, res, ctx) => {
+    return res(ctx.json(mockGameDetailResponse));
+  }),
+  
+  rest.get('/api/statistics/overview', (req, res, ctx) => {
+    return res(ctx.json(mockStatisticsResponse));
+  }),
+  
+  rest.get('/api/leaderboard', (req, res, ctx) => {
+    return res(ctx.json(mockLeaderboardResponse));
+  }),
+  
+  // Error scenario handlers
+  rest.get('/api/games/error', (req, res, ctx) => {
+    return res(ctx.status(500), ctx.json({
+      detail: 'Internal server error'
+    }));
+  })
+);
+
+// Test wrapper component
+const TestWrapper: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const queryClient = new QueryClient({
+    defaultOptions: {
+      queries: {
+        retry: false,
+      },
+    },
+  });
+
+  return (
+    <QueryClientProvider client={queryClient}>
+      <ErrorProvider>
+        <BrowserRouter>
+          {children}
+        </BrowserRouter>
+      </ErrorProvider>
+    </QueryClientProvider>
+  );
+};
+
+describe('Integration Tests - Frontend Components with API', () => {
+  beforeAll(() => server.listen());
+  afterEach(() => server.resetHandlers());
+  afterAll(() => server.close());
+
+  describe('GameListView Integration', () => {
+    it('loads and displays games from API', async () => {
+      render(
+        <TestWrapper>
+          <GameListView />
+        </TestWrapper>
+      );
+
+      // Should show loading initially
+      expect(screen.getByText('Loading games...')).toBeInTheDocument();
+
+      // Should display games after API call
+      await waitFor(() => {
+        expect(screen.getByText('game_1')).toBeInTheDocument();
+      });
+
+      // Check game details are displayed
+      expect(screen.getByText('gpt-4')).toBeInTheDocument();
+      expect(screen.getByText('claude-3')).toBeInTheDocument();
+      expect(screen.getByText('WHITE_WINS')).toBeInTheDocument();
+    });
+
+    it('handles search functionality with API integration', async () => {
+      render(
+        <TestWrapper>
+          <GameListView />
+        </TestWrapper>
+      );
+
+      // Wait for initial load
+      await waitFor(() => {
+        expect(screen.getByText('game_1')).toBeInTheDocument();
+      });
+
+      // Find and interact with search input
+      const searchInput = screen.getByPlaceholderText(/search/i);
+      fireEvent.change(searchInput, { target: { value: 'gpt-4' } });
+
+      // Should trigger API call with search parameter
+      await waitFor(() => {
+        // The mock should return filtered results
+        expect(screen.getByText('gpt-4')).toBeInTheDocument();
+      });
+    });
+
+    it('handles pagination controls', async () => {
+      render(
+        <TestWrapper>
+          <GameListView />
+        </TestWrapper>
+      );
+
+      await waitFor(() => {
+        expect(screen.getByText('game_1')).toBeInTheDocument();
+      });
+
+      // Check pagination info is displayed
+      expect(screen.getByText('1')).toBeInTheDocument(); // Current page
+      expect(screen.getByText('1')).toBeInTheDocument(); // Total pages
+    });
+  });
+
+  describe('GameDetailView Integration', () => {
+    it('loads and displays game detail from API', async () => {
+      // Mock useParams to return a game ID
+      jest.mock('react-router-dom', () => ({
+        ...jest.requireActual('react-router-dom'),
+        useParams: () => ({ gameId: 'game_1' }),
+      }));
+
+      render(
+        <TestWrapper>
+          <GameDetailView />
+        </TestWrapper>
+      );
+
+      // Should display game details after API call
+      await waitFor(() => {
+        expect(screen.getByText('game_1')).toBeInTheDocument();
+      });
+
+      // Check that move details are displayed
+      expect(screen.getByText('e4')).toBeInTheDocument();
+      expect(screen.getByText('I will play e4 to control the center.')).toBeInTheDocument();
+    });
+  });
+
+  describe('StatisticsDashboard Integration', () => {
+    it('loads and displays statistics from API', async () => {
+      render(
+        <TestWrapper>
+          <StatisticsDashboard />
+        </TestWrapper>
+      );
+
+      // Should display statistics after API call
+      await waitFor(() => {
+        expect(screen.getByText('150')).toBeInTheDocument(); // Total games
+      });
+
+      expect(screen.getByText('12')).toBeInTheDocument(); // Total players
+      expect(screen.getByText('52%')).toBeInTheDocument(); // White win rate
+      expect(screen.getByText('gpt-4')).toBeInTheDocument(); // Most active model
+    });
+  });
+
+  describe('LeaderboardView Integration', () => {
+    it('loads and displays leaderboard from API', async () => {
+      render(
+        <TestWrapper>
+          <LeaderboardView />
+        </TestWrapper>
+      );
+
+      // Should display leaderboard after API call
+      await waitFor(() => {
+        expect(screen.getByText('player_1')).toBeInTheDocument();
+      });
+
+      expect(screen.getByText('player_2')).toBeInTheDocument();
+      expect(screen.getByText('62.2%')).toBeInTheDocument(); // Win rate
+      expect(screen.getByText('1350')).toBeInTheDocument(); // ELO rating
+    });
+
+    it('handles sorting changes', async () => {
+      render(
+        <TestWrapper>
+          <LeaderboardView />
+        </TestWrapper>
+      );
+
+      await waitFor(() => {
+        expect(screen.getByText('player_1')).toBeInTheDocument();
+      });
+
+      // Find sort dropdown and change it
+      const sortSelect = screen.getByRole('combobox');
+      fireEvent.change(sortSelect, { target: { value: 'elo_rating' } });
+
+      // Should maintain data display (API call would be triggered)
+      await waitFor(() => {
+        expect(screen.getByText('player_1')).toBeInTheDocument();
+      });
+    });
+  });
+
+  describe('Error Handling Integration', () => {
+    it('displays error messages when API calls fail', async () => {
+      // Temporarily override the games endpoint to return an error
+      server.use(
+        rest.get('/api/games', (req, res, ctx) => {
+          return res(ctx.status(500), ctx.json({
+            detail: 'Internal server error'
+          }));
+        })
+      );
+
+      render(
+        <TestWrapper>
+          <GameListView />
+        </TestWrapper>
+      );
+
+      // Should display error message
+      await waitFor(() => {
+        expect(screen.getByText(/error/i)).toBeInTheDocument();
+      });
+    });
+  });
+
+  describe('Cross-Component Integration', () => {
+    it('maintains state consistency across components', async () => {
+      // This test would verify that filtering in one component 
+      // doesn't affect other components inappropriately
+      render(
+        <TestWrapper>
+          <div>
+            <GameListView />
+            <StatisticsDashboard />
+          </div>
+        </TestWrapper>
+      );
+
+      // Wait for both components to load
+      await waitFor(() => {
+        expect(screen.getByText('game_1')).toBeInTheDocument();
+        expect(screen.getByText('150')).toBeInTheDocument();
+      });
+
+      // Both components should have loaded independently
+      expect(screen.getByText('gpt-4')).toBeInTheDocument();
+      expect(screen.getByText('12')).toBeInTheDocument();
+    });
+  });
+});

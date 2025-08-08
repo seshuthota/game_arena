@@ -1,0 +1,18 @@
+{
+  "success": true,
+  "timestamp": "2024-01-01T12:00:00Z",
+  "statistics": {
+    "total_games": 150,
+    "total_players": 12,
+    "completed_games": 145,
+    "average_game_duration_minutes": 45.5,
+    "total_moves": 6750,
+    "average_moves_per_game": 46.6,
+    "white_win_rate": 0.52,
+    "black_win_rate": 0.38,
+    "draw_rate": 0.10,
+    "most_common_termination": "CHECKMATE",
+    "most_active_model": "gpt-4",
+    "blunder_rate": 0.08
+  }
+}
