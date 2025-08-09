@@ -28,6 +28,12 @@ export const FilterPanel: React.FC<FilterPanelProps> = ({
     max_moves: filters.max_moves || '',
     min_duration: filters.min_duration || '',
     max_duration: filters.max_duration || '',
+    // New advanced filters
+    opening_eco_codes: (filters as any).opening_eco_codes?.join(', ') || '',
+    opening_names: (filters as any).opening_names?.join(', ') || '',
+    player_matchup: (filters as any).player_matchup || '',
+    duration_range: (filters as any).duration_range || '',
+    move_count_range: (filters as any).move_count_range || '',
   });
 
   // Debounced search function
@@ -53,7 +59,7 @@ export const FilterPanel: React.FC<FilterPanelProps> = ({
         delete newFilters.search;
       }
       
-      onFiltersChange(newFilters);
+      onFiltersChange?.(newFilters);
     }, 300),
     [filters, onFiltersChange]
   );
@@ -141,7 +147,38 @@ export const FilterPanel: React.FC<FilterPanelProps> = ({
       delete newFilters.max_duration;
     }
 
-    onFiltersChange(newFilters);
+    // Process new advanced filters
+    if (localFilters.opening_eco_codes.trim()) {
+      (newFilters as any).opening_eco_codes = localFilters.opening_eco_codes.split(',').map(code => code.trim()).filter(code => code);
+    } else {
+      delete (newFilters as any).opening_eco_codes;
+    }
+
+    if (localFilters.opening_names.trim()) {
+      (newFilters as any).opening_names = localFilters.opening_names.split(',').map(name => name.trim()).filter(name => name);
+    } else {
+      delete (newFilters as any).opening_names;
+    }
+
+    if (localFilters.player_matchup.trim()) {
+      (newFilters as any).player_matchup = localFilters.player_matchup;
+    } else {
+      delete (newFilters as any).player_matchup;
+    }
+
+    if (localFilters.duration_range) {
+      (newFilters as any).duration_range = localFilters.duration_range;
+    } else {
+      delete (newFilters as any).duration_range;
+    }
+
+    if (localFilters.move_count_range) {
+      (newFilters as any).move_count_range = localFilters.move_count_range;
+    } else {
+      delete (newFilters as any).move_count_range;
+    }
+
+    onFiltersChange?.(newFilters);
   };
 
   // Clear all filters
@@ -159,8 +196,14 @@ export const FilterPanel: React.FC<FilterPanelProps> = ({
       max_moves: '',
       min_duration: '',
       max_duration: '',
+      // Clear new advanced filters
+      opening_eco_codes: '',
+      opening_names: '',
+      player_matchup: '',
+      duration_range: '',
+      move_count_range: '',
     });
-    onClearFilters();
+    onClearFilters?.();
   };
 
   // Check if any filters are active
@@ -380,6 +423,104 @@ export const FilterPanel: React.FC<FilterPanelProps> = ({
                     onChange={(e) => setLocalFilters({ ...localFilters, max_duration: e.target.value })}
                     className="filter-input"
                   />
+                </div>
+              </div>
+            </div>
+
+            {/* Opening Analysis Filters */}
+            <div className="filter-section">
+              <h4 className="filter-section-title">Opening Analysis</h4>
+              
+              <div className="filter-field">
+                <label htmlFor="opening_eco_codes" className="filter-label">ECO Codes</label>
+                <input
+                  id="opening_eco_codes"
+                  type="text"
+                  placeholder="A00, B01, C20 (comma-separated)"
+                  value={localFilters.opening_eco_codes}
+                  onChange={(e) => setLocalFilters({ ...localFilters, opening_eco_codes: e.target.value })}
+                  className="filter-input"
+                />
+                <div className="filter-help">
+                  Filter by Encyclopedia of Chess Openings codes
+                </div>
+              </div>
+
+              <div className="filter-field">
+                <label htmlFor="opening_names" className="filter-label">Opening Names</label>
+                <input
+                  id="opening_names"
+                  type="text"
+                  placeholder="Sicilian Defense, Queen's Gambit (comma-separated)"
+                  value={localFilters.opening_names}
+                  onChange={(e) => setLocalFilters({ ...localFilters, opening_names: e.target.value })}
+                  className="filter-input"
+                />
+                <div className="filter-help">
+                  Filter by opening names or variations
+                </div>
+              </div>
+            </div>
+
+            {/* Player Matchup Filters */}
+            <div className="filter-section">
+              <h4 className="filter-section-title">Player Matchups</h4>
+              
+              <div className="filter-field">
+                <label htmlFor="player_matchup" className="filter-label">Head-to-Head Analysis</label>
+                <input
+                  id="player_matchup"
+                  type="text"
+                  placeholder="player1 vs player2"
+                  value={localFilters.player_matchup}
+                  onChange={(e) => setLocalFilters({ ...localFilters, player_matchup: e.target.value })}
+                  className="filter-input"
+                />
+                <div className="filter-help">
+                  Find games between specific players (e.g., "gpt-4 vs claude-3")
+                </div>
+              </div>
+            </div>
+
+            {/* Enhanced Game Length Filters */}
+            <div className="filter-section">
+              <h4 className="filter-section-title">Game Length Analysis</h4>
+              
+              <div className="filter-field">
+                <label htmlFor="duration_range" className="filter-label">Duration Range</label>
+                <select
+                  id="duration_range"
+                  value={localFilters.duration_range}
+                  onChange={(e) => setLocalFilters({ ...localFilters, duration_range: e.target.value })}
+                  className="filter-input"
+                >
+                  <option value="">All durations</option>
+                  <option value="blitz">Blitz (≤ 10 min)</option>
+                  <option value="rapid">Rapid (10-30 min)</option>
+                  <option value="classical">Classical (30-90 min)</option>
+                  <option value="correspondence">Correspondence (> 90 min)</option>
+                </select>
+                <div className="filter-help">
+                  Filter by game duration categories
+                </div>
+              </div>
+
+              <div className="filter-field">
+                <label htmlFor="move_count_range" className="filter-label">Move Count Range</label>
+                <select
+                  id="move_count_range"
+                  value={localFilters.move_count_range}
+                  onChange={(e) => setLocalFilters({ ...localFilters, move_count_range: e.target.value })}
+                  className="filter-input"
+                >
+                  <option value="">All move counts</option>
+                  <option value="short">Short games (≤ 20 moves)</option>
+                  <option value="medium">Medium games (21-40 moves)</option>
+                  <option value="long">Long games (41-60 moves)</option>
+                  <option value="very_long">Very long games (> 60 moves)</option>
+                </select>
+                <div className="filter-help">
+                  Filter by total number of moves played
                 </div>
               </div>
             </div>
@@ -604,6 +745,13 @@ export const FilterPanel: React.FC<FilterPanelProps> = ({
         .checkbox-text {
           font-size: 0.875rem;
           color: #374151;
+        }
+
+        .filter-help {
+          font-size: 0.75rem;
+          color: #6b7280;
+          margin-top: 0.25rem;
+          font-style: italic;
         }
 
         .filter-actions {

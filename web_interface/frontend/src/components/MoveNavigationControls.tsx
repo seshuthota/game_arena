@@ -1,8 +1,17 @@
-import React, { useEffect, useCallback } from 'react';
+import React, { useEffect, useCallback, useRef, useMemo } from 'react';
+import PositionCache from '../utils/positionCache';
+
+export interface MoveRecord {
+  move_notation: string;
+  fen_before?: string;
+  fen_after?: string;
+  timestamp?: string;
+}
 
 export interface MoveNavigationControlsProps {
   currentMoveIndex: number | null;
   totalMoves: number;
+  moves?: MoveRecord[]; // For position caching
   onFirst: () => void;
   onPrevious: () => void;
   onNext: () => void;
@@ -13,11 +22,13 @@ export interface MoveNavigationControlsProps {
   playSpeed?: number;
   onSpeedChange?: (speed: number) => void;
   disabled?: boolean;
+  onPositionPreload?: (positions: string[]) => void; // For preloading positions
 }
 
 export const MoveNavigationControls: React.FC<MoveNavigationControlsProps> = ({
   currentMoveIndex,
   totalMoves,
+  moves = [],
   onFirst,
   onPrevious,
   onNext,
@@ -27,9 +38,73 @@ export const MoveNavigationControls: React.FC<MoveNavigationControlsProps> = ({
   onTogglePlay,
   playSpeed = 1000,
   onSpeedChange,
-  disabled = false
+  disabled = false,
+  onPositionPreload
 }) => {
-  // Keyboard shortcuts
+  // Position cache for efficient navigation
+  const positionCacheRef = useRef<PositionCache>(new PositionCache());
+  
+  // Memoized position cache to avoid recreation
+  const positionCache = useMemo(() => positionCacheRef.current, []);
+
+  // Preload positions around current move for smooth navigation
+  useEffect(() => {
+    if (moves.length > 0 && currentMoveIndex !== null) {
+      const preloadRange = 5; // Preload 5 moves in each direction
+      const startIndex = Math.max(0, currentMoveIndex - preloadRange);
+      const endIndex = Math.min(moves.length - 1, currentMoveIndex + preloadRange);
+      
+      // Preload positions in background
+      requestIdleCallback(() => {
+        positionCache.preloadPositions(startIndex, endIndex, moves);
+        
+        // Notify parent component of preloaded positions if callback provided
+        if (onPositionPreload) {
+          const preloadedPositions: string[] = [];
+          for (let i = startIndex; i <= endIndex; i++) {
+            try {
+              const position = positionCache.getPositionAtMove(i, moves);
+              preloadedPositions.push(position);
+            } catch (error) {
+              console.warn(`Failed to preload position at move ${i}:`, error);
+            }
+          }
+          onPositionPreload(preloadedPositions);
+        }
+      });
+    }
+  }, [currentMoveIndex, moves, positionCache, onPositionPreload]);
+
+  // Enhanced navigation handlers with position caching
+  const handleFirst = useCallback(() => {
+    positionCache.preloadPositions(0, Math.min(4, totalMoves - 1), moves);
+    onFirst();
+  }, [onFirst, positionCache, totalMoves, moves]);
+
+  const handlePrevious = useCallback(() => {
+    if (currentMoveIndex !== null && currentMoveIndex > 0) {
+      // Preload a few positions before current
+      const preloadStart = Math.max(0, currentMoveIndex - 3);
+      positionCache.preloadPositions(preloadStart, currentMoveIndex - 1, moves);
+    }
+    onPrevious();
+  }, [onPrevious, currentMoveIndex, positionCache, moves]);
+
+  const handleNext = useCallback(() => {
+    if (currentMoveIndex !== null && currentMoveIndex < totalMoves - 1) {
+      // Preload a few positions after current
+      const preloadEnd = Math.min(totalMoves - 1, currentMoveIndex + 3);
+      positionCache.preloadPositions(currentMoveIndex + 1, preloadEnd, moves);
+    }
+    onNext();
+  }, [onNext, currentMoveIndex, totalMoves, positionCache, moves]);
+
+  const handleLast = useCallback(() => {
+    const lastIndex = totalMoves - 1;
+    positionCache.preloadPositions(Math.max(0, lastIndex - 4), lastIndex, moves);
+    onLast();
+  }, [onLast, totalMoves, positionCache, moves]);
+  // Keyboard shortcuts with cached handlers
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
       if (disabled) return;
@@ -42,19 +117,19 @@ export const MoveNavigationControls: React.FC<MoveNavigationControlsProps> = ({
       switch (event.key) {
         case 'ArrowLeft':
           event.preventDefault();
-          onPrevious();
+          handlePrevious();
           break;
         case 'ArrowRight':
           event.preventDefault();
-          onNext();
+          handleNext();
           break;
         case 'Home':
           event.preventDefault();
-          onFirst();
+          handleFirst();
           break;
         case 'End':
           event.preventDefault();
-          onLast();
+          handleLast();
           break;
         case ' ':
           event.preventDefault();
@@ -72,7 +147,7 @@ export const MoveNavigationControls: React.FC<MoveNavigationControlsProps> = ({
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [disabled, onFirst, onPrevious, onNext, onLast, onTogglePlay, onJumpToMove]);
+  }, [disabled, handleFirst, handlePrevious, handleNext, handleLast, onTogglePlay, onJumpToMove]);
 
   const canGoPrevious = currentMoveIndex !== null && currentMoveIndex > 0;
   const canGoNext = currentMoveIndex !== null && currentMoveIndex < totalMoves - 1;
@@ -96,7 +171,7 @@ export const MoveNavigationControls: React.FC<MoveNavigationControlsProps> = ({
     <div className="move-navigation-controls">
       <div className="navigation-buttons">
         <button
-          onClick={onFirst}
+          onClick={handleFirst}
           disabled={disabled || !canGoFirst}
           className="nav-button first-button"
           title="First move (Home)"
@@ -106,7 +181,7 @@ export const MoveNavigationControls: React.FC<MoveNavigationControlsProps> = ({
         </button>
         
         <button
-          onClick={onPrevious}
+          onClick={handlePrevious}
           disabled={disabled || !canGoPrevious}
           className="nav-button previous-button"
           title="Previous move (←)"
@@ -128,7 +203,7 @@ export const MoveNavigationControls: React.FC<MoveNavigationControlsProps> = ({
         )}
         
         <button
-          onClick={onNext}
+          onClick={handleNext}
           disabled={disabled || !canGoNext}
           className="nav-button next-button"
           title="Next move (→)"
@@ -138,7 +213,7 @@ export const MoveNavigationControls: React.FC<MoveNavigationControlsProps> = ({
         </button>
         
         <button
-          onClick={onLast}
+          onClick={handleLast}
           disabled={disabled || !canGoLast}
           className="nav-button last-button"
           title="Last move (End)"

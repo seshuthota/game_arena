@@ -1,10 +1,72 @@
-import React, { useEffect, useRef, useState, useCallback } from 'react';
+import React, { useEffect, useRef, useState, useCallback, useMemo } from 'react';
 import { Chess } from 'chess.js';
+import PositionCache from '../utils/positionCache';
 
 // Import Chessboard.js types and library
 declare global {
   interface Window {
     Chessboard: any;
+  }
+}
+
+// Lazy loading utility for chess engine libraries
+class ChessLibraryLoader {
+  private static instance: ChessLibraryLoader;
+  private loadPromise: Promise<boolean> | null = null;
+  private isLoaded = false;
+
+  static getInstance(): ChessLibraryLoader {
+    if (!ChessLibraryLoader.instance) {
+      ChessLibraryLoader.instance = new ChessLibraryLoader();
+    }
+    return ChessLibraryLoader.instance;
+  }
+
+  async loadLibraries(): Promise<boolean> {
+    if (this.isLoaded) {
+      return true;
+    }
+
+    if (this.loadPromise) {
+      return this.loadPromise;
+    }
+
+    this.loadPromise = this.performLoad();
+    return this.loadPromise;
+  }
+
+  private async performLoad(): Promise<boolean> {
+    try {
+      // Load CSS if not already loaded
+      if (!document.querySelector('link[href*="chessboard"]')) {
+        const cssLink = document.createElement('link');
+        cssLink.rel = 'stylesheet';
+        cssLink.href = 'https://unpkg.com/@chrisoakman/chessboardjs@1.0.0/dist/chessboard-1.0.0.min.css';
+        document.head.appendChild(cssLink);
+      }
+
+      // Load JS if not already loaded
+      if (!window.Chessboard) {
+        await new Promise<void>((resolve, reject) => {
+          const script = document.createElement('script');
+          script.src = 'https://unpkg.com/@chrisoakman/chessboardjs@1.0.0/dist/chessboard-1.0.0.min.js';
+          script.onload = () => resolve();
+          script.onerror = () => reject(new Error('Failed to load chessboard library'));
+          document.head.appendChild(script);
+        });
+      }
+
+      this.isLoaded = true;
+      return true;
+    } catch (error) {
+      console.error('Failed to load chess libraries:', error);
+      this.loadPromise = null;
+      return false;
+    }
+  }
+
+  isLibraryLoaded(): boolean {
+    return this.isLoaded && !!window.Chessboard;
   }
 }
 
@@ -29,7 +91,8 @@ export interface ChessBoardComponentProps {
   lastMove?: { from: string; to: string } | null;
 }
 
-export const ChessBoardComponent: React.FC<ChessBoardComponentProps> = ({
+// Optimized ChessBoardComponent with React.memo for performance
+const ChessBoardComponentInternal: React.FC<ChessBoardComponentProps> = ({
   position,
   orientation = 'white',
   showCoordinates = true,
@@ -44,38 +107,34 @@ export const ChessBoardComponent: React.FC<ChessBoardComponentProps> = ({
   const boardRef = useRef<HTMLDivElement>(null);
   const chessRef = useRef<Chess | null>(null);
   const boardInstanceRef = useRef<any>(null);
+  const positionCacheRef = useRef<PositionCache>(new PositionCache());
   const [error, setError] = useState<string | null>(null);
   const [isLibraryLoaded, setIsLibraryLoaded] = useState(false);
 
-  // Load Chessboard.js library
-  useEffect(() => {
-    const loadChessboardLibrary = async () => {
-      try {
-        // Load CSS
-        if (!document.querySelector('link[href*="chessboard"]')) {
-          const cssLink = document.createElement('link');
-          cssLink.rel = 'stylesheet';
-          cssLink.href = 'https://unpkg.com/@chrisoakman/chessboardjs@1.0.0/dist/chessboard-1.0.0.min.css';
-          document.head.appendChild(cssLink);
-        }
+  // Memoized library loader instance
+  const libraryLoader = useMemo(() => ChessLibraryLoader.getInstance(), []);
 
-        // Load JS
-        if (!window.Chessboard) {
-          const script = document.createElement('script');
-          script.src = 'https://unpkg.com/@chrisoakman/chessboardjs@1.0.0/dist/chessboard-1.0.0.min.js';
-          script.onload = () => setIsLibraryLoaded(true);
-          script.onerror = () => setError('Failed to load chessboard library');
-          document.head.appendChild(script);
-        } else {
+  // Load Chessboard.js library with lazy loading
+  useEffect(() => {
+    const loadLibraries = async () => {
+      try {
+        const loaded = await libraryLoader.loadLibraries();
+        if (loaded) {
           setIsLibraryLoaded(true);
+        } else {
+          setError('Failed to load chess libraries');
         }
       } catch (err) {
-        setError('Failed to load chessboard library');
+        setError('Failed to load chess libraries');
       }
     };
 
-    loadChessboardLibrary();
-  }, []);
+    if (libraryLoader.isLibraryLoaded()) {
+      setIsLibraryLoaded(true);
+    } else {
+      loadLibraries();
+    }
+  }, [libraryLoader]);
 
   // Validate and set position
   const validatePosition = useCallback((fen: string): { isValid: boolean; chess?: Chess; error?: string } => {
@@ -359,5 +418,23 @@ export const ChessBoardComponent: React.FC<ChessBoardComponentProps> = ({
     </div>
   );
 };
+
+// Memoized component to prevent unnecessary re-renders
+export const ChessBoardComponent = React.memo(ChessBoardComponentInternal, (prevProps, nextProps) => {
+  // Custom comparison function for optimal re-rendering
+  return (
+    prevProps.position === nextProps.position &&
+    prevProps.orientation === nextProps.orientation &&
+    prevProps.showCoordinates === nextProps.showCoordinates &&
+    prevProps.highlightLastMove === nextProps.highlightLastMove &&
+    prevProps.highlightLegalMoves === nextProps.highlightLegalMoves &&
+    prevProps.animationSpeed === nextProps.animationSpeed &&
+    prevProps.disabled === nextProps.disabled &&
+    // Deep comparison for lastMove object
+    JSON.stringify(prevProps.lastMove) === JSON.stringify(nextProps.lastMove)
+  );
+});
+
+ChessBoardComponent.displayName = 'ChessBoardComponent';
 
 export default ChessBoardComponent;

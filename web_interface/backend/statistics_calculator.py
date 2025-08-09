@@ -3,6 +3,7 @@ Accurate Statistics Calculator for Chess Game Analysis.
 
 This module provides comprehensive and accurate statistics calculation
 with proper handling of incomplete data, data validation, and error recovery.
+Enhanced with intelligent caching for improved performance.
 """
 
 import logging
@@ -14,6 +15,7 @@ from collections import defaultdict
 from game_arena.storage import QueryEngine
 from game_arena.storage.models import GameRecord, GameResult, PlayerInfo
 from elo_rating import ELORatingSystem, GameOutcome
+from statistics_cache import StatisticsCache, get_statistics_cache
 
 logger = logging.getLogger(__name__)
 
@@ -204,24 +206,76 @@ class DataValidator:
 
 class AccurateStatisticsCalculator:
     """
-    Calculates accurate player statistics with proper error handling
-    and data validation.
+    Calculates accurate player statistics with proper error handling,
+    data validation, and intelligent caching for improved performance.
     """
     
-    def __init__(self, query_engine: QueryEngine):
+    def __init__(self, query_engine: QueryEngine, cache: Optional[StatisticsCache] = None):
         """Initialize the statistics calculator."""
         self.query_engine = query_engine
         self.elo_system = ELORatingSystem()
         self.validator = DataValidator()
+        self.cache = cache or get_statistics_cache()
         self.logger = logging.getLogger(f"{__name__}.{self.__class__.__name__}")
     
     async def calculate_player_statistics(
         self, 
         player_id: str,
+        include_incomplete_data: bool = True,
+        use_cache: bool = True
+    ) -> Optional[AccuratePlayerStatistics]:
+        """
+        Calculate comprehensive and accurate statistics for a player with caching.
+        
+        Args:
+            player_id: ID of the player to analyze
+            include_incomplete_data: Whether to include games with incomplete data
+            use_cache: Whether to use cached results if available
+            
+        Returns:
+            AccuratePlayerStatistics object or None if player not found
+        """
+        # Create cache key
+        cache_key_parts = ["player_stats", player_id, include_incomplete_data]
+        
+        if use_cache:
+            # Try to get from cache first
+            cached_stats = self.cache.get(
+                cache_key_parts,
+                dependencies=[f"player:{player_id}"]
+            )
+            
+            if cached_stats is not None:
+                self.logger.debug(f"Retrieved cached statistics for player {player_id}")
+                return cached_stats
+        
+        try:
+            # Calculate statistics (not cached or cache miss)
+            stats = await self._calculate_player_statistics_uncached(player_id, include_incomplete_data)
+            
+            if stats and use_cache:
+                # Cache the results with dependencies
+                self.cache.set(
+                    cache_key_parts,
+                    stats,
+                    ttl=300.0,  # 5 minutes
+                    dependencies=[f"player:{player_id}"]
+                )
+                self.logger.debug(f"Cached statistics for player {player_id}")
+            
+            return stats
+            
+        except Exception as e:
+            self.logger.error(f"Failed to calculate statistics for player {player_id}: {e}")
+            return None
+
+    async def _calculate_player_statistics_uncached(
+        self, 
+        player_id: str,
         include_incomplete_data: bool = True
     ) -> Optional[AccuratePlayerStatistics]:
         """
-        Calculate comprehensive and accurate statistics for a player.
+        Calculate comprehensive and accurate statistics for a player (uncached version).
         
         Args:
             player_id: ID of the player to analyze
@@ -230,64 +284,59 @@ class AccurateStatisticsCalculator:
         Returns:
             AccuratePlayerStatistics object or None if player not found
         """
-        try:
-            # Get all games for this player
-            all_games = await self.query_engine.get_games_by_players(player_id)
-            
-            if not all_games:
-                self.logger.warning(f"No games found for player {player_id}")
-                return None
-            
-            # Get player info from first valid game
-            player_info = self._extract_player_info(all_games, player_id)
-            if not player_info:
-                self.logger.error(f"Could not extract player info for {player_id}")
-                return None
-            
-            # Initialize statistics object
-            stats = AccuratePlayerStatistics(
-                player_id=player_id,
-                model_name=player_info.model_name,
-                model_provider=player_info.model_provider or "unknown"
-            )
-            
-            # Validate and categorize games
-            valid_games, data_quality = self._validate_and_categorize_games(all_games)
-            stats.data_quality = data_quality
-            
-            # Use valid games or all games based on parameter
-            games_to_analyze = valid_games if not include_incomplete_data else all_games
-            
-            if not games_to_analyze:
-                self.logger.warning(f"No valid games to analyze for player {player_id}")
-                return stats
-            
-            # Calculate basic game statistics
-            await self._calculate_basic_game_stats(stats, games_to_analyze, player_id)
-            
-            # Calculate ELO rating and history
-            await self._calculate_elo_statistics(stats, games_to_analyze, player_id)
-            
-            # Calculate performance metrics
-            await self._calculate_performance_metrics(stats, games_to_analyze, player_id)
-            
-            # Calculate recent performance and streaks
-            await self._calculate_recent_performance(stats, games_to_analyze, player_id)
-            
-            # Calculate opponent analysis
-            await self._calculate_opponent_analysis(stats, games_to_analyze, player_id)
-            
-            # Calculate derived statistics
-            stats.calculate_derived_stats()
-            
-            self.logger.info(f"Calculated statistics for {player_id}: {stats.wins}W-{stats.losses}L-{stats.draws}D, "
-                           f"ELO: {stats.current_elo:.1f}, Win Rate: {stats.win_rate:.1f}%")
-            
-            return stats
-            
-        except Exception as e:
-            self.logger.error(f"Failed to calculate statistics for player {player_id}: {e}")
+        # Get all games for this player
+        all_games = await self.query_engine.get_games_by_players(player_id)
+        
+        if not all_games:
+            self.logger.warning(f"No games found for player {player_id}")
             return None
+        
+        # Get player info from first valid game
+        player_info = self._extract_player_info(all_games, player_id)
+        if not player_info:
+            self.logger.error(f"Could not extract player info for {player_id}")
+            return None
+        
+        # Initialize statistics object
+        stats = AccuratePlayerStatistics(
+            player_id=player_id,
+            model_name=player_info.model_name,
+            model_provider=player_info.model_provider or "unknown"
+        )
+        
+        # Validate and categorize games
+        valid_games, data_quality = self._validate_and_categorize_games(all_games)
+        stats.data_quality = data_quality
+        
+        # Use valid games or all games based on parameter
+        games_to_analyze = valid_games if not include_incomplete_data else all_games
+        
+        if not games_to_analyze:
+            self.logger.warning(f"No valid games to analyze for player {player_id}")
+            return stats
+        
+        # Calculate basic game statistics
+        await self._calculate_basic_game_stats(stats, games_to_analyze, player_id)
+        
+        # Calculate ELO rating and history
+        await self._calculate_elo_statistics(stats, games_to_analyze, player_id)
+        
+        # Calculate performance metrics
+        await self._calculate_performance_metrics(stats, games_to_analyze, player_id)
+        
+        # Calculate recent performance and streaks
+        await self._calculate_recent_performance(stats, games_to_analyze, player_id)
+        
+        # Calculate opponent analysis
+        await self._calculate_opponent_analysis(stats, games_to_analyze, player_id)
+        
+        # Calculate derived statistics
+        stats.calculate_derived_stats()
+        
+        self.logger.info(f"Calculated statistics for {player_id}: {stats.wins}W-{stats.losses}L-{stats.draws}D, "
+                       f"ELO: {stats.current_elo:.1f}, Win Rate: {stats.win_rate:.1f}%")
+        
+        return stats
     
     def _extract_player_info(self, games: List[GameRecord], player_id: str) -> Optional[PlayerInfo]:
         """Extract player information from games."""
@@ -559,10 +608,63 @@ class AccurateStatisticsCalculator:
         self,
         sort_by: str = "elo_rating",
         min_games: int = 5,
+        limit: int = 100,
+        use_cache: bool = True
+    ) -> List[LeaderboardEntry]:
+        """
+        Generate an accurate leaderboard with proper statistics and caching.
+        
+        Args:
+            sort_by: Sorting criteria ("elo_rating", "win_rate", "games_played")
+            min_games: Minimum games required to be included
+            limit: Maximum number of entries to return
+            use_cache: Whether to use cached results if available
+            
+        Returns:
+            List of leaderboard entries
+        """
+        # Create cache key
+        cache_key_parts = ["leaderboard", sort_by, min_games, limit]
+        
+        if use_cache:
+            # Try to get from cache first
+            cached_leaderboard = self.cache.get(
+                cache_key_parts,
+                dependencies=["leaderboard"]
+            )
+            
+            if cached_leaderboard is not None:
+                self.logger.debug(f"Retrieved cached leaderboard (sort_by={sort_by}, limit={limit})")
+                return cached_leaderboard
+        
+        try:
+            # Calculate leaderboard (not cached or cache miss)
+            leaderboard_entries = await self._generate_leaderboard_uncached(sort_by, min_games, limit)
+            
+            if leaderboard_entries and use_cache:
+                # Cache the results with longer TTL for leaderboards
+                self.cache.set(
+                    cache_key_parts,
+                    leaderboard_entries,
+                    ttl=600.0,  # 10 minutes
+                    dependencies=["leaderboard"]
+                )
+                self.logger.debug(f"Cached leaderboard (sort_by={sort_by}, limit={limit})")
+            
+            return leaderboard_entries
+            
+        except Exception as e:
+            self.logger.error(f"Failed to generate leaderboard: {e}")
+            return []
+
+    async def _generate_leaderboard_uncached(
+        self,
+        sort_by: str = "elo_rating",
+        min_games: int = 5,
         limit: int = 100
     ) -> List[LeaderboardEntry]:
         """
-        Generate an accurate leaderboard with proper statistics.
+        Generate an accurate leaderboard with proper statistics (uncached version).
         
         Args:
             sort_by: Sorting criteria ("elo_rating", "win_rate", "games_played")
@@ -572,57 +674,82 @@ class AccurateStatisticsCalculator:
         Returns:
             List of leaderboard entries
         """
-        try:
-            # Get all unique players
-            all_games = await self.query_engine.storage_manager.query_games({})
-            player_ids = set()
+        # Get all unique players
+        all_games = await self.query_engine.storage_manager.query_games({})
+        player_ids = set()
+        
+        for game in all_games:
+            for player_info in game.players.values():
+                player_ids.add(player_info.player_id)
+        
+        # Calculate statistics for each player (using cache for individual players)
+        leaderboard_entries = []
+        
+        for player_id in player_ids:
+            stats = await self.calculate_player_statistics(player_id, use_cache=True)
             
-            for game in all_games:
-                for player_info in game.players.values():
-                    player_ids.add(player_info.player_id)
+            if not stats or stats.completed_games < min_games:
+                continue
             
-            # Calculate statistics for each player
-            leaderboard_entries = []
+            # Calculate ranking score based on sort criteria
+            if sort_by == "elo_rating":
+                ranking_score = stats.current_elo
+            elif sort_by == "win_rate":
+                ranking_score = stats.win_rate
+            elif sort_by == "games_played":
+                ranking_score = stats.completed_games
+            else:
+                ranking_score = stats.current_elo
             
-            for player_id in player_ids:
-                stats = await self.calculate_player_statistics(player_id)
-                
-                if not stats or stats.completed_games < min_games:
-                    continue
-                
-                # Calculate ranking score based on sort criteria
-                if sort_by == "elo_rating":
-                    ranking_score = stats.current_elo
-                elif sort_by == "win_rate":
-                    ranking_score = stats.win_rate
-                elif sort_by == "games_played":
-                    ranking_score = stats.completed_games
-                else:
-                    ranking_score = stats.current_elo
-                
-                entry = LeaderboardEntry(
-                    rank=0,  # Will be set after sorting
-                    player_id=player_id,
-                    model_name=stats.model_name,
-                    model_provider=stats.model_provider,
-                    statistics=stats,
-                    ranking_score=ranking_score
-                )
-                
-                leaderboard_entries.append(entry)
+            entry = LeaderboardEntry(
+                rank=0,  # Will be set after sorting
+                player_id=player_id,
+                model_name=stats.model_name,
+                model_provider=stats.model_provider,
+                statistics=stats,
+                ranking_score=ranking_score
+            )
             
-            # Sort by ranking score (descending)
-            leaderboard_entries.sort(key=lambda x: x.ranking_score, reverse=True)
+            leaderboard_entries.append(entry)
+        
+        # Sort by ranking score (descending)
+        leaderboard_entries.sort(key=lambda x: x.ranking_score, reverse=True)
+        
+        # Assign ranks and limit results
+        for i, entry in enumerate(leaderboard_entries[:limit]):
+            entry.rank = i + 1
+        
+        self.logger.info(f"Generated leaderboard with {len(leaderboard_entries[:limit])} entries, "
+                       f"sorted by {sort_by}")
+        
+        return leaderboard_entries[:limit]
+
+    def invalidate_player_cache(self, player_id: str) -> int:
+        """
+        Invalidate cache entries for a specific player.
+        
+        Args:
+            player_id: ID of the player whose cache should be invalidated
             
-            # Assign ranks and limit results
-            for i, entry in enumerate(leaderboard_entries[:limit]):
-                entry.rank = i + 1
-            
-            self.logger.info(f"Generated leaderboard with {len(leaderboard_entries[:limit])} entries, "
-                           f"sorted by {sort_by}")
-            
-            return leaderboard_entries[:limit]
-            
-        except Exception as e:
-            self.logger.error(f"Failed to generate leaderboard: {e}")
-            return []
+        Returns:
+            Number of cache entries invalidated
+        """
+        return self.cache.invalidate(f"player:{player_id}")
+
+    def invalidate_leaderboard_cache(self) -> int:
+        """
+        Invalidate all leaderboard cache entries.
+        
+        Returns:
+            Number of cache entries invalidated
+        """
+        return self.cache.invalidate("leaderboard")
+
+    def get_cache_stats(self) -> Dict[str, Any]:
+        """
+        Get cache performance statistics.
+        
+        Returns:
+            Dictionary containing cache statistics
+        """
+        return self.cache.get_stats()
