@@ -45,6 +45,12 @@ web_interface/backend/.coverage
 web_interface/backend/server.log
 *.db
 
+# Test and debug files
+.coverage
+debug_stats.py
+test_export.py
+test_simple_game.py
+
 # Editor files
 *.swp
 *.swo
