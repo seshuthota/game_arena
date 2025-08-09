@@ -1,0 +1,48 @@
+{
+  "success": true,
+  "timestamp": "2024-01-01T12:00:00Z",
+  "leaderboard": [
+    {
+      "rank": 1,
+      "player_id": "player_1",
+      "model_name": "gpt-4",
+      "model_provider": "openai",
+      "games_played": 45,
+      "wins": 28,
+      "losses": 15,
+      "draws": 2,
+      "win_rate": 0.622,
+      "average_game_duration": 42.3,
+      "elo_rating": 1350
+    },
+    {
+      "rank": 2,
+      "player_id": "player_2",
+      "model_name": "claude-3",
+      "model_provider": "anthropic",
+      "games_played": 38,
+      "wins": 22,
+      "losses": 14,
+      "draws": 2,
+      "win_rate": 0.579,
+      "average_game_duration": 48.7,
+      "elo_rating": 1280
+    },
+    {
+      "rank": 3,
+      "player_id": "player_3",
+      "model_name": "gemini-pro",
+      "model_provider": "google",
+      "games_played": 32,
+      "wins": 18,
+      "losses": 12,
+      "draws": 2,
+      "win_rate": 0.563,
+      "average_game_duration": 52.1,
+      "elo_rating": 1220
+    }
+  ],
+  "filters_applied": {
+    "sort_by": "win_rate"
+  }
+}
