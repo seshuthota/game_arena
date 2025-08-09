@@ -41,6 +41,7 @@ from game_arena.harness import game_notation_examples
 from game_arena.harness import gui
 from game_arena.harness import llm_parsers
 from game_arena.harness import model_generation_openrouter
+from game_arena.harness import model_generation_ollama
 from game_arena.harness import model_generation_sdk
 from game_arena.harness import model_registry
 from game_arena.harness import parsers
@@ -70,27 +71,27 @@ _NUM_MOVES = flags.DEFINE_integer(
 _PLAYER_1_PROVIDER = flags.DEFINE_enum(
     "player1_provider",
     "registry",
-    ["registry", "openrouter", "openai", "gemini", "anthropic"],
+    ["registry", "openrouter", "openai", "gemini", "anthropic", "ollama"],
     "Provider for player 1 (Black). 'registry' uses ModelRegistry.",
 )
 
 _PLAYER_1_MODEL = flags.DEFINE_string(
     "player1_model",
     "GEMINI_2_5_FLASH",
-    "Model for player 1. Examples: registry='GEMINI_2_5_FLASH', openrouter='anthropic/claude-3.5-sonnet', openai='gpt-4o-mini', gemini='gemini-2.5-flash'",
+    "Model for player 1. Examples: registry='GEMINI_2_5_FLASH', openrouter='anthropic/claude-3.5-sonnet', openai='gpt-4o-mini', gemini='gemini-2.5-flash', ollama='llama3'",
 )
 
 _PLAYER_2_PROVIDER = flags.DEFINE_enum(
     "player2_provider",
     "registry", 
-    ["registry", "openrouter", "openai", "gemini", "anthropic"],
+    ["registry", "openrouter", "openai", "gemini", "anthropic", "ollama"],
     "Provider for player 2 (White). 'registry' uses ModelRegistry enum name.",
 )
 
 _PLAYER_2_MODEL = flags.DEFINE_string(
     "player2_model",
     "OPENAI_GPT_4_1",
-    "Model for player 2. Examples: registry='OPENAI_GPT_4_1', openrouter='openai/gpt-4o-mini', openai='gpt-4o-mini', gemini='gemini-2.5-flash'",
+    "Model for player 2. Examples: registry='OPENAI_GPT_4_1', openrouter='openai/gpt-4o-mini', openai='gpt-4o-mini', gemini='gemini-2.5-flash', ollama='llama3'",
 )
 
 _PARSER_CHOICE = flags.DEFINE_enum_class(
@@ -180,6 +181,12 @@ def create_model(provider: str, model_name: str, player_name: str):
     return model_generation_sdk.AnthropicModel(
         model_name=model_name,
         model_options={"temperature": 0.7, "max_tokens": 1000}
+    )
+  
+  elif provider == "ollama":
+    return model_generation_ollama.OllamaModel(
+        model_name=model_name,
+        model_options={"temperature": 0.7, "max_output_tokens": 1000}
     )
   
   else:
@@ -492,7 +499,7 @@ async def main_async(_) -> None:
           status_message = f"🔄 {player_name}: {provider}:{model_name} retry {attempt}..."
         
         # Add system instruction for cleaner responses from all models except registry
-        if provider in ["openrouter", "gemini", "openai", "anthropic"]:
+        if provider in ["openrouter", "gemini", "openai", "anthropic", "ollama"]:
           chess_system_instruction = "You are a chess expert. Respond ONLY with the chess move in standard algebraic notation (e.g., e4, Nf3, O-O). No explanation or additional text."
           prompt_with_system = tournament_util.ModelTextInput(
               prompt_text=current_prompt.prompt_text,

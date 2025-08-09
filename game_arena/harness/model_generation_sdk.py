@@ -269,10 +269,10 @@ class OpenAIChatCompletionsModel(model_generation.MultimodalModel):
     if self._api_options is None:
       self._api_options = {}
 
+    # GPT-5 models don't support custom temperature settings
+    is_gpt5_model = self._model_name.startswith("gpt-5")
+    
     config = {
-        "temperature": self._model_options.get(
-            "temperature", openai_internal_types.NotGiven()
-        ),
         "top_p": self._model_options.get(
             "top_p", openai_internal_types.NotGiven()
         ),
@@ -283,6 +283,12 @@ class OpenAIChatCompletionsModel(model_generation.MultimodalModel):
             "reasoning_effort", openai_internal_types.NotGiven()
         ),
     }
+    
+    # Only add temperature for non-GPT-5 models
+    if not is_gpt5_model:
+        config["temperature"] = self._model_options.get(
+            "temperature", openai_internal_types.NotGiven()
+        )
 
     if self._api_options.get("stream", False):
       stream_options = {"include_usage": True}

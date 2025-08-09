@@ -567,7 +567,10 @@ const GameRow: React.FC<GameRowProps> = memo(({ game }) => {
       if (!game.outcome) return <span className="result-ongoing">Ongoing</span>;
       
       const playerEntries = Object.entries(game.players);
-      const [whitePlayer, blackPlayer] = playerEntries;
+      // Fix: Based on move data, player 1 is White and player 0 is Black
+      // So position "1" in players object is White, position "0" is Black
+      const whitePlayer = playerEntries.find(([position]) => position === "1");
+      const blackPlayer = playerEntries.find(([position]) => position === "0");
       
       const getWinnerName = (winner: number) => {
         const player = playerEntries.find(([position]) => parseInt(position) === winner);
@@ -624,7 +627,9 @@ const GameRow: React.FC<GameRowProps> = memo(({ game }) => {
     };
   }, [game.duration_minutes, game.start_time, game.outcome, game.players]);
 
-  const [whitePlayer, blackPlayer] = playerEntries;
+  // Fix: Based on move data, player 1 is White and player 0 is Black
+  const whitePlayer = playerEntries.find(([position]) => position === "1");
+  const blackPlayer = playerEntries.find(([position]) => position === "0");
 
   // Performance monitoring in development
   const shouldMonitor = process.env.NODE_ENV === 'development';

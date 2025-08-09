@@ -428,7 +428,9 @@ const GameHeader: React.FC<GameHeaderProps> = memo(({ game }) => {
   };
 
   const playerEntries = Object.entries(game.players);
-  const [whitePlayer, blackPlayer] = playerEntries;
+  // Fix: Based on move data, player 1 is White and player 0 is Black
+  const whitePlayer = playerEntries.find(([position]) => position === "1");
+  const blackPlayer = playerEntries.find(([position]) => position === "0");
   const result = getResultDisplay();
 
   return (
