@@ -498,7 +498,7 @@ export const FilterPanel: React.FC<FilterPanelProps> = ({
                   <option value="blitz">Blitz (≤ 10 min)</option>
                   <option value="rapid">Rapid (10-30 min)</option>
                   <option value="classical">Classical (30-90 min)</option>
-                  <option value="correspondence">Correspondence (> 90 min)</option>
+                  <option value="correspondence">Correspondence (&gt; 90 min)</option>
                 </select>
                 <div className="filter-help">
                   Filter by game duration categories
@@ -517,7 +517,7 @@ export const FilterPanel: React.FC<FilterPanelProps> = ({
                   <option value="short">Short games (≤ 20 moves)</option>
                   <option value="medium">Medium games (21-40 moves)</option>
                   <option value="long">Long games (41-60 moves)</option>
-                  <option value="very_long">Very long games (> 60 moves)</option>
+                  <option value="very_long">Very long games (&gt; 60 moves)</option>
                 </select>
                 <div className="filter-help">
                   Filter by total number of moves played

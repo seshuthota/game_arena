@@ -2,73 +2,45 @@ import React, { useEffect, useRef, useState, useCallback, useMemo } from 'react'
 import { Chess } from 'chess.js';
 import PositionCache from '../utils/positionCache';
 
-// Import Chessboard.js types and library
+// Import CSS directly
+import '@chrisoakman/chessboardjs/dist/chessboard-1.0.0.min.css';
+
+// Type declaration for Chessboard.js
 declare global {
   interface Window {
     Chessboard: any;
   }
 }
 
-// Lazy loading utility for chess engine libraries
-class ChessLibraryLoader {
-  private static instance: ChessLibraryLoader;
-  private loadPromise: Promise<boolean> | null = null;
-  private isLoaded = false;
-
-  static getInstance(): ChessLibraryLoader {
-    if (!ChessLibraryLoader.instance) {
-      ChessLibraryLoader.instance = new ChessLibraryLoader();
-    }
-    return ChessLibraryLoader.instance;
-  }
-
-  async loadLibraries(): Promise<boolean> {
-    if (this.isLoaded) {
-      return true;
-    }
-
-    if (this.loadPromise) {
-      return this.loadPromise;
-    }
-
-    this.loadPromise = this.performLoad();
-    return this.loadPromise;
-  }
-
-  private async performLoad(): Promise<boolean> {
+// Load chessboard library from npm package
+let chessboardLoaded = false;
+const loadChessboardLib = (): boolean => {
+  if (!chessboardLoaded) {
     try {
-      // Load CSS if not already loaded
-      if (!document.querySelector('link[href*="chessboard"]')) {
-        const cssLink = document.createElement('link');
-        cssLink.rel = 'stylesheet';
-        cssLink.href = 'https://unpkg.com/@chrisoakman/chessboardjs@1.0.0/dist/chessboard-1.0.0.min.css';
-        document.head.appendChild(cssLink);
+      // First, load and set up jQuery globally
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const $ = require('jquery');
+      
+      // Make jQuery available globally for chessboard.js
+      if (typeof window !== 'undefined') {
+        (window as any).$ = $;
+        (window as any).jQuery = $;
       }
-
-      // Load JS if not already loaded
-      if (!window.Chessboard) {
-        await new Promise<void>((resolve, reject) => {
-          const script = document.createElement('script');
-          script.src = 'https://unpkg.com/@chrisoakman/chessboardjs@1.0.0/dist/chessboard-1.0.0.min.js';
-          script.onload = () => resolve();
-          script.onerror = () => reject(new Error('Failed to load chessboard library'));
-          document.head.appendChild(script);
-        });
-      }
-
-      this.isLoaded = true;
+      
+      // Now load chessboard.js
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('@chrisoakman/chessboardjs/dist/chessboard-1.0.0.min.js');
+      
+      chessboardLoaded = true;
       return true;
     } catch (error) {
-      console.error('Failed to load chess libraries:', error);
-      this.loadPromise = null;
+      console.error('Failed to load chessboard library from npm:', error);
       return false;
     }
   }
+  return true;
+};
 
-  isLibraryLoaded(): boolean {
-    return this.isLoaded && !!window.Chessboard;
-  }
-}
 
 export interface ChessMove {
   from: string;
@@ -111,31 +83,6 @@ const ChessBoardComponentInternal: React.FC<ChessBoardComponentProps> = ({
   const [error, setError] = useState<string | null>(null);
   const [isLibraryLoaded, setIsLibraryLoaded] = useState(false);
 
-  // Memoized library loader instance
-  const libraryLoader = useMemo(() => ChessLibraryLoader.getInstance(), []);
-
-  // Load Chessboard.js library with lazy loading
-  useEffect(() => {
-    const loadLibraries = async () => {
-      try {
-        const loaded = await libraryLoader.loadLibraries();
-        if (loaded) {
-          setIsLibraryLoaded(true);
-        } else {
-          setError('Failed to load chess libraries');
-        }
-      } catch (err) {
-        setError('Failed to load chess libraries');
-      }
-    };
-
-    if (libraryLoader.isLibraryLoaded()) {
-      setIsLibraryLoaded(true);
-    } else {
-      loadLibraries();
-    }
-  }, [libraryLoader]);
-
   // Validate and set position
   const validatePosition = useCallback((fen: string): { isValid: boolean; chess?: Chess; error?: string } => {
     try {
@@ -145,6 +92,16 @@ const ChessBoardComponentInternal: React.FC<ChessBoardComponentProps> = ({
       return { isValid: true, chess };
     } catch (err) {
       return { isValid: false, error: `FEN validation error: ${err instanceof Error ? err.message : 'Unknown error'}` };
+    }
+  }, []);
+
+  // Load the chessboard library
+  useEffect(() => {
+    const loaded = loadChessboardLib();
+    if (loaded) {
+      setIsLibraryLoaded(true);
+    } else {
+      setError('Failed to load chess library');
     }
   }, []);
 
@@ -168,6 +125,7 @@ const ChessBoardComponentInternal: React.FC<ChessBoardComponentProps> = ({
       showNotation: showCoordinates,
       draggable: !disabled,
       animationSpeed: animationSpeed,
+      pieceTheme: 'https://chessboardjs.com/img/chesspieces/wikipedia/{piece}.png',
       onDragStart: (source: string, piece: string) => {
         // Don't allow moves if disabled or game is over
         if (disabled || chessRef.current?.isGameOver()) {
@@ -223,7 +181,7 @@ const ChessBoardComponentInternal: React.FC<ChessBoardComponentProps> = ({
       }
     };
 
-    // Create board instance
+    // Create board instance using loaded Chessboard
     try {
       boardInstanceRef.current = window.Chessboard(boardRef.current, config);
     } catch (err) {
@@ -313,6 +271,7 @@ const ChessBoardComponentInternal: React.FC<ChessBoardComponentProps> = ({
       </div>
     );
   }
+
 
   if (error) {
     return (

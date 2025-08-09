@@ -7,7 +7,6 @@ import { GameListSkeleton } from './LoadingSkeleton';
 import { GameListErrorBoundary } from './ErrorBoundary';
 import { LoadingButton } from './LoadingStates';
 import { GameCard } from './GameCard';
-import { FilterPanel } from './FilterPanel';
 import { useQueryClient } from '@tanstack/react-query';
 import { 
   usePerformanceMonitor, 
@@ -298,27 +297,10 @@ export const GameListView: React.FC<GameListViewProps> = ({
     );
   }
 
-  // Handle filter changes
-  const handleFiltersChange = useStableCallback((newFilters: GameListParams) => {
-    setPage(1); // Reset to first page when filters change
-    onFilterChange?.(newFilters);
-  }, [onFilterChange]);
-
-  // Handle clear filters
-  const handleClearFilters = useStableCallback(() => {
-    setPage(1);
-    onFilterChange?.({ page: 1, limit, sort_by: sortBy });
-  }, [onFilterChange, limit, sortBy]);
 
   return (
     <GameListErrorBoundary>
       <div className="game-list-view">
-        {/* Advanced Filters */}
-        <FilterPanel
-          filters={filters}
-          onFiltersChange={handleFiltersChange}
-          onClearFilters={handleClearFilters}
-        />
 
         {/* Controls */}
         <div className="controls-bar">

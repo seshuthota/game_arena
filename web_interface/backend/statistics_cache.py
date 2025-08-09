@@ -77,6 +77,19 @@ class StatisticsCache:
         
         # Background refresh callbacks
         self._refresh_callbacks: Dict[str, Callable] = {}
+        
+        # Batch operations and cache warming
+        self._warming_queue: List[Dict[str, Any]] = []
+        self._warming_in_progress: bool = False
+        self._warming_lock = threading.Lock()
+        
+        # Cache partitioning by data type
+        self._partitions: Dict[str, Dict[str, CacheEntry]] = {
+            'player_stats': {},
+            'leaderboards': {},
+            'aggregates': {},
+            'time_series': {}
+        }
 
     def _generate_cache_key(self, key_parts: List[Any]) -> str:
         """Generate a consistent cache key from multiple parts."""
@@ -347,6 +360,199 @@ class StatisticsCache:
                 'stats': self.get_stats(),
                 'dependencies': dict(self._dependencies)
             }
+    
+    def batch_get(self, batch_requests: List[Dict[str, Any]]) -> Dict[str, Any]:
+        """
+        Batch get operation for multiple cache keys.
+        
+        Args:
+            batch_requests: List of dicts with keys: 'key_parts', 'calculator', 'ttl', 'dependencies'
+            
+        Returns:
+            Dict mapping request index to cached/calculated values
+        """
+        results = {}
+        missing_requests = []
+        
+        # First pass: check for cached values
+        for i, request in enumerate(batch_requests):
+            key_parts = request['key_parts']
+            cache_key = self._generate_cache_key(key_parts)
+            
+            with self._lock:
+                if cache_key in self._cache:
+                    entry = self._cache[cache_key]
+                    if not entry.is_expired():
+                        entry.touch()
+                        self._stats['hits'] += 1
+                        results[i] = entry.data
+                        continue
+                    else:
+                        del self._cache[cache_key]
+                
+                self._stats['misses'] += 1
+                missing_requests.append((i, request))
+        
+        # Second pass: calculate missing values
+        for i, request in missing_requests:
+            calculator = request.get('calculator')
+            if calculator:
+                try:
+                    calculated_value = calculator()
+                    self.set(
+                        request['key_parts'],
+                        calculated_value,
+                        request.get('ttl'),
+                        request.get('dependencies')
+                    )
+                    results[i] = calculated_value
+                except Exception as e:
+                    logger.error(f"Error in batch calculation for request {i}: {e}")
+                    results[i] = None
+            else:
+                results[i] = None
+        
+        return results
+    
+    def batch_set(self, batch_data: List[Dict[str, Any]]) -> int:
+        """
+        Batch set operation for multiple cache entries.
+        
+        Args:
+            batch_data: List of dicts with keys: 'key_parts', 'value', 'ttl', 'dependencies'
+            
+        Returns:
+            Number of entries successfully set
+        """
+        success_count = 0
+        
+        for data in batch_data:
+            try:
+                self.set(
+                    data['key_parts'],
+                    data['value'],
+                    data.get('ttl'),
+                    data.get('dependencies')
+                )
+                success_count += 1
+            except Exception as e:
+                logger.error(f"Error in batch set for key {data['key_parts']}: {e}")
+        
+        return success_count
+    
+    def batch_invalidate(self, dependency_patterns: List[str]) -> int:
+        """
+        Batch invalidation for multiple dependency patterns.
+        
+        Args:
+            dependency_patterns: List of dependency patterns to invalidate
+            
+        Returns:
+            Total number of entries invalidated
+        """
+        total_invalidated = 0
+        
+        for pattern in dependency_patterns:
+            total_invalidated += self.invalidate(pattern)
+        
+        return total_invalidated
+    
+    def warm_cache(self, warming_requests: List[Dict[str, Any]]) -> None:
+        """
+        Warm cache with frequently accessed data.
+        
+        Args:
+            warming_requests: List of requests to warm cache with
+        """
+        with self._warming_lock:
+            if self._warming_in_progress:
+                # Add to queue if warming is in progress
+                self._warming_queue.extend(warming_requests)
+                return
+            
+            self._warming_in_progress = True
+        
+        def warming_worker():
+            try:
+                # Process current requests
+                for request in warming_requests:
+                    try:
+                        calculator = request.get('calculator')
+                        if calculator:
+                            key_parts = request['key_parts']
+                            cache_key = self._generate_cache_key(key_parts)
+                            
+                            # Only warm if not already cached
+                            with self._lock:
+                                if cache_key not in self._cache or self._cache[cache_key].is_expired():
+                                    calculated_value = calculator()
+                                    self.set(
+                                        key_parts,
+                                        calculated_value,
+                                        request.get('ttl'),
+                                        request.get('dependencies')
+                                    )
+                                    logger.debug(f"Cache warmed for key: {cache_key}")
+                    except Exception as e:
+                        logger.error(f"Error warming cache for {request.get('key_parts', 'unknown')}: {e}")
+                
+                # Process queued requests
+                with self._warming_lock:
+                    while self._warming_queue:
+                        queued_requests = self._warming_queue.copy()
+                        self._warming_queue.clear()
+                        
+                        for request in queued_requests:
+                            try:
+                                calculator = request.get('calculator')
+                                if calculator:
+                                    calculated_value = calculator()
+                                    self.set(
+                                        request['key_parts'],
+                                        calculated_value,
+                                        request.get('ttl'),
+                                        request.get('dependencies')
+                                    )
+                            except Exception as e:
+                                logger.error(f"Error in queued cache warming: {e}")
+            
+            finally:
+                with self._warming_lock:
+                    self._warming_in_progress = False
+        
+        # Start background warming
+        threading.Thread(target=warming_worker, daemon=True).start()
+    
+    def get_partition_stats(self) -> Dict[str, Dict[str, Any]]:
+        """Get statistics for each cache partition."""
+        partition_stats = {}
+        
+        for partition_name, partition_cache in self._partitions.items():
+            partition_stats[partition_name] = {
+                'size': len(partition_cache),
+                'entries': list(partition_cache.keys())
+            }
+        
+        return partition_stats
+    
+    def preload_popular_data(self, popular_keys: List[Dict[str, Any]]) -> None:
+        """
+        Preload frequently accessed data based on usage patterns.
+        
+        Args:
+            popular_keys: List of popular key requests to preload
+        """
+        logger.info(f"Preloading {len(popular_keys)} popular cache entries")
+        
+        # Sort by expected access frequency (if provided)
+        sorted_keys = sorted(
+            popular_keys,
+            key=lambda x: x.get('access_frequency', 0),
+            reverse=True
+        )
+        
+        # Warm cache with popular data
+        self.warm_cache(sorted_keys)
 
 
 # Global cache instance

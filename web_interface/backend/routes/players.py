@@ -15,6 +15,9 @@ from game_arena.storage import QueryEngine
 from dependencies import get_query_engine_from_app, get_pagination_params
 from models import LeaderboardResponse, PlayerStatisticsResponse, SortOptions
 from statistics_calculator import AccurateStatisticsCalculator
+from caching_middleware import cache_response, CacheType
+from cache_manager import get_cache_manager
+from batch_statistics_processor import get_batch_processor, BatchCalculationRequest
 
 logger = logging.getLogger(__name__)
 
@@ -22,6 +25,12 @@ router = APIRouter()
 
 
 @router.get("/leaderboard", response_model=LeaderboardResponse)
+@cache_response(
+    ttl=600.0,  # 10 minutes cache
+    cache_type=CacheType.LEADERBOARDS,
+    dependencies=["leaderboard", "players"],
+    enable_warming=True
+)
 async def get_leaderboard(
     request: Request,
     page: int = Query(1, ge=1, description="Page number (1-based)"),
@@ -63,8 +72,8 @@ async def get_leaderboard(
         if min_games:
             filters['min_games'] = min_games
         
-        # Use the new accurate statistics calculator
-        stats_calculator = AccurateStatisticsCalculator(query_engine)
+        # Try to use batch processor for better performance
+        batch_processor = get_batch_processor(query_engine)
         
         # Map sort options to calculator format
         sort_mapping = {
@@ -79,12 +88,23 @@ async def get_leaderboard(
         calculator_sort_by = sort_mapping.get(sort_by, "elo_rating")
         min_games_filter = filters.get('min_games', 1)
         
-        # Generate accurate leaderboard
-        leaderboard_entries = await stats_calculator.generate_accurate_leaderboard(
-            sort_by=calculator_sort_by,
-            min_games=min_games_filter,
-            limit=1000  # Get more entries for filtering
-        )
+        # Use batch processor for optimized leaderboard generation
+        try:
+            leaderboard_entries = await batch_processor.generate_leaderboard_batch(
+                sort_by=calculator_sort_by,
+                min_games=min_games_filter,
+                limit=1000,  # Get more entries for filtering
+                force_recalculate=False
+            )
+        except Exception as e:
+            logger.warning(f"Batch processor failed, falling back to regular calculator: {e}")
+            # Fallback to regular statistics calculator
+            stats_calculator = AccurateStatisticsCalculator(query_engine)
+            leaderboard_entries = await stats_calculator.generate_accurate_leaderboard(
+                sort_by=calculator_sort_by,
+                min_games=min_games_filter,
+                limit=1000
+            )
         
         # Convert to PlayerRanking objects and apply additional filters
         sorted_players = []
@@ -170,6 +190,12 @@ async def get_leaderboard(
 
 
 @router.get("/players/{player_id}/statistics", response_model=PlayerStatisticsResponse)
+@cache_response(
+    ttl=300.0,  # 5 minutes cache
+    cache_type=CacheType.PLAYER_STATISTICS,
+    dependencies=["players"],
+    enable_warming=True
+)
 async def get_player_statistics(
     player_id: str,
     request: Request,
@@ -188,9 +214,24 @@ async def get_player_statistics(
     - Technical metrics (parsing success rate, ELO rating)
     """
     try:
-        # Use the new accurate statistics calculator
-        stats_calculator = AccurateStatisticsCalculator(query_engine)
-        accurate_stats = await stats_calculator.calculate_player_statistics(player_id)
+        # Try to use cache manager for optimized retrieval
+        cache_manager = get_cache_manager()
+        
+        try:
+            # Use cache manager with intelligent warming
+            accurate_stats = await cache_manager.get_with_warming(
+                cache_type=CacheType.PLAYER_STATISTICS,
+                key_parts=['player_stats', player_id, True],  # Include incomplete data
+                calculator=lambda: AccurateStatisticsCalculator(query_engine).calculate_player_statistics(player_id),
+                ttl=300.0,
+                dependencies=[f'player:{player_id}'],
+                warm_related=True
+            )
+        except Exception as e:
+            logger.warning(f"Cache manager failed, using direct calculation: {e}")
+            # Fallback to direct calculation
+            stats_calculator = AccurateStatisticsCalculator(query_engine)
+            accurate_stats = await stats_calculator.calculate_player_statistics(player_id)
         
         if not accurate_stats:
             raise HTTPException(
