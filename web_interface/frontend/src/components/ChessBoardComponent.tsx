@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState, useCallback, useMemo } from 'react';
 import { Chess } from 'chess.js';
 import PositionCache from '../utils/positionCache';
+import { usePerformanceMonitor } from '../utils/performanceMonitor';
 
 // Import CSS directly
 import '@chrisoakman/chessboardjs/dist/chessboard-1.0.0.min.css';
