@@ -1,5 +1,6 @@
 import React, { useState, useMemo } from 'react';
 import { useLeaderboard, usePlayerStatistics } from '../hooks/useApi';
+import { LeaderboardResponse, PlayerStatisticsResponse } from '../types/api';
 import { LoadingSkeleton } from './LoadingSkeleton';
 import { HeadToHeadComparison } from './HeadToHeadComparison';
 
@@ -60,16 +61,17 @@ export const PlayerPerformanceAnalytics: React.FC<PlayerPerformanceAnalyticsProp
     data: playerStatsData,
     isLoading: playerStatsLoading,
     error: playerStatsError
-  } = usePlayerStatistics(selectedPlayer, { enabled: !!selectedPlayer });
+  } = usePlayerStatistics(selectedPlayer || '');
 
   const isLoading = leaderboardLoading || (selectedPlayer && playerStatsLoading);
   const hasError = leaderboardError || playerStatsError;
 
   // Transform leaderboard data into player performance data
   const playerPerformanceData = useMemo(() => {
-    if (!leaderboardData?.players) return [];
+    const leaderboard = leaderboardData as LeaderboardResponse;
+    if (!leaderboard?.players) return [];
 
-    return leaderboardData.players.map(player => {
+    return leaderboard.players.map(player => {
       // Calculate performance trends based on available data
       const performanceTrend = player.win_rate > 60 ? 'improving' : 
                               player.win_rate < 40 ? 'declining' : 'stable';

@@ -61,7 +61,6 @@ export const GameCard: React.FC<GameCardProps> = memo(({ game }) => {
           case TerminationReason.INSUFFICIENT_MATERIAL: return 'insufficient material';
           case TerminationReason.THREEFOLD_REPETITION: return 'threefold repetition';
           case TerminationReason.FIFTY_MOVE_RULE: return 'fifty-move rule';
-          default: return termination.toLowerCase().replace('_', ' ');
         }
       };
 

@@ -48,8 +48,8 @@ jest.mock('chessboard-jsx', () => ({
 }));
 
 // Import components to test
-import ChessBoardComponent from '../components/ChessBoardComponent';
-import MoveNavigationControls from '../components/MoveNavigationControls';
+import ChessBoardComponent from '../components/ChessBoardComponentWrapper';
+import MoveNavigationControls from '../components/MoveNavigationControlsWrapper';
 import GameAnalysisView from '../components/GameAnalysisView';
 
 // Mock game data for testing
@@ -476,7 +476,9 @@ describe('Chess Board E2E Tests', () => {
       const corruptedGameData = {
         ...mockGameData,
         analysis: {
-          positions: ['invalid', 'also_invalid', 'still_invalid']
+          positions: ['invalid', 'also_invalid', 'still_invalid'],
+          evaluations: [0.0, 0.0, 0.0],
+          move_quality: ['unknown', 'unknown', 'unknown']
         }
       };
       
@@ -605,16 +607,58 @@ describe('Full Game Analysis Workflow E2E', () => {
   test('complete game analysis viewing workflow', async () => {
     const user = userEvent.setup();
     
-    // Mock API responses
-    global.fetch = jest.fn((url) => {
-      if (url.includes('/api/games/1')) {
-        return Promise.resolve({
+    // Mock API responses with proper typing
+    const mockFetch = jest.fn<Promise<Response>, [RequestInfo | URL, RequestInit?]>((url) => {
+      // Handle different URL types
+      const urlString = typeof url === 'string' ? url : 
+                       url instanceof URL ? url.toString() : 
+                       (url as Request).url;
+      
+      if (urlString.includes('/api/games/1')) {
+        // Create a proper Response-like mock
+        const mockResponse = {
           ok: true,
-          json: () => Promise.resolve(mockGameData)
-        });
+          status: 200,
+          statusText: 'OK',
+          headers: new Headers(),
+          url: urlString,
+          type: 'basic' as ResponseType,
+          redirected: false,
+          clone: () => mockResponse,
+          body: null,
+          bodyUsed: false,
+          arrayBuffer: () => Promise.resolve(new ArrayBuffer(0)),
+          blob: () => Promise.resolve(new Blob()),
+          formData: () => Promise.resolve(new FormData()),
+          json: () => Promise.resolve(mockGameData),
+          text: () => Promise.resolve(JSON.stringify(mockGameData)),
+        } as Response;
+        
+        return Promise.resolve(mockResponse);
       }
-      return Promise.reject(new Error('Not found'));
+      
+      const errorResponse = {
+        ok: false,
+        status: 404,
+        statusText: 'Not Found',
+        headers: new Headers(),
+        url: urlString,
+        type: 'basic' as ResponseType,
+        redirected: false,
+        clone: () => errorResponse,
+        body: null,
+        bodyUsed: false,
+        arrayBuffer: () => Promise.resolve(new ArrayBuffer(0)),
+        blob: () => Promise.resolve(new Blob()),
+        formData: () => Promise.resolve(new FormData()),
+        json: () => Promise.reject(new Error('Not found')),
+        text: () => Promise.resolve('Not found'),
+      } as Response;
+      
+      return Promise.resolve(errorResponse);
     });
+    
+    global.fetch = mockFetch;
     
     render(<GameAnalysisView gameId={1} />);
     

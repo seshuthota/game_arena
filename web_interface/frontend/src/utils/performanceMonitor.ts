@@ -2,6 +2,8 @@
  * Performance monitoring utilities for chess board and statistics
  */
 
+import { LayoutShiftEntry } from '../types/performance';
+
 export interface PerformanceMetric {
   name: string;
   value: number;
@@ -74,15 +76,19 @@ class PerformanceMonitor {
         // Layout Shift Observer
         const layoutShiftObserver = new PerformanceObserver((list) => {
           for (const entry of list.getEntries()) {
-            if (!entry.hadRecentInput) {
+            // Type guard to ensure this is a LayoutShiftEntry
+            const layoutShiftEntry = entry as LayoutShiftEntry;
+            
+            // Check if the properties exist (for browser compatibility)
+            if (typeof layoutShiftEntry.hadRecentInput === 'boolean' && !layoutShiftEntry.hadRecentInput) {
               this.recordMetric({
                 name: 'layout_shift',
-                value: (entry as any).value,
+                value: layoutShiftEntry.value || 0,
                 timestamp: entry.startTime,
                 category: 'user_interaction',
                 metadata: {
-                  lastInputTime: (entry as any).lastInputTime,
-                  sources: (entry as any).sources?.length || 0,
+                  lastInputTime: layoutShiftEntry.lastInputTime || 0,
+                  sources: layoutShiftEntry.sources?.length || 0,
                 }
               });
             }

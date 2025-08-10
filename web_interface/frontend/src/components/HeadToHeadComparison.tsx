@@ -1,5 +1,6 @@
 import React, { useState, useMemo } from 'react';
 import { useLeaderboard, usePlayerStatistics } from '../hooks/useApi';
+import { LeaderboardResponse, PlayerStatisticsResponse } from '../types/api';
 import { LoadingSkeleton } from './LoadingSkeleton';
 
 interface HeadToHeadComparisonProps {
@@ -91,23 +92,24 @@ export const HeadToHeadComparison: React.FC<HeadToHeadComparisonProps> = ({
     data: player1StatsData,
     isLoading: player1StatsLoading,
     error: player1StatsError
-  } = usePlayerStatistics(selectedPlayer1, { enabled: !!selectedPlayer1 });
+  } = usePlayerStatistics(selectedPlayer1 || '');
 
   const {
     data: player2StatsData,
     isLoading: player2StatsLoading,
     error: player2StatsError
-  } = usePlayerStatistics(selectedPlayer2, { enabled: !!selectedPlayer2 });
+  } = usePlayerStatistics(selectedPlayer2 || '');
 
   const isLoading = leaderboardLoading || player1StatsLoading || player2StatsLoading;
   const hasError = leaderboardError || player1StatsError || player2StatsError;
 
   // Generate head-to-head comparison data
   const comparisonData = useMemo((): HeadToHeadComparison | null => {
-    if (!leaderboardData?.players || !selectedPlayer1 || !selectedPlayer2) return null;
+    const leaderboard = leaderboardData as LeaderboardResponse;
+    if (!leaderboard?.players || !selectedPlayer1 || !selectedPlayer2) return null;
 
-    const player1Data = leaderboardData.players.find(p => p.player_id === selectedPlayer1);
-    const player2Data = leaderboardData.players.find(p => p.player_id === selectedPlayer2);
+    const player1Data = leaderboard.players.find(p => p.player_id === selectedPlayer1);
+    const player2Data = leaderboard.players.find(p => p.player_id === selectedPlayer2);
 
     if (!player1Data || !player2Data) return null;
 
@@ -277,7 +279,7 @@ export const HeadToHeadComparison: React.FC<HeadToHeadComparisonProps> = ({
               className="player-select"
             >
               <option value="">Select Player 1...</option>
-              {leaderboardData?.players.map(player => (
+              {(leaderboardData as LeaderboardResponse)?.players?.map(player => (
                 <option key={player.player_id} value={player.player_id}>
                   {player.model_name} ({player.games_played} games)
                 </option>
@@ -296,7 +298,7 @@ export const HeadToHeadComparison: React.FC<HeadToHeadComparisonProps> = ({
               className="player-select"
             >
               <option value="">Select Player 2...</option>
-              {leaderboardData?.players.map(player => (
+              {(leaderboardData as LeaderboardResponse)?.players?.map(player => (
                 <option key={player.player_id} value={player.player_id}>
                   {player.model_name} ({player.games_played} games)
                 </option>

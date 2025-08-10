@@ -1,6 +1,7 @@
 import React from 'react';
 import { Link } from 'react-router-dom';
 import { useStatisticsOverview, useHealthCheck } from '../hooks/useApi';
+import { StatisticsOverviewResponse } from '../types/api';
 
 export const Dashboard: React.FC = () => {
   const { data: statsData, isLoading: statsLoading, error: statsError } = useStatisticsOverview();
@@ -60,20 +61,20 @@ export const Dashboard: React.FC = () => {
             <h2 className="stats-title">Quick Overview</h2>
             <div className="stats-grid">
               <div className="stat-card">
-                <div className="stat-value">{statsData?.statistics?.total_games?.toLocaleString() || '0'}</div>
+                <div className="stat-value">{(statsData as StatisticsOverviewResponse)?.statistics?.total_games?.toLocaleString() || '0'}</div>
                 <div className="stat-label">Total Games</div>
               </div>
               <div className="stat-card">
-                <div className="stat-value">{statsData?.statistics?.completed_games?.toLocaleString() || '0'}</div>
+                <div className="stat-value">{(statsData as StatisticsOverviewResponse)?.statistics?.completed_games?.toLocaleString() || '0'}</div>
                 <div className="stat-label">Completed</div>
               </div>
               <div className="stat-card">
-                <div className="stat-value">{statsData?.statistics?.total_players?.toLocaleString() || '0'}</div>
+                <div className="stat-value">{(statsData as StatisticsOverviewResponse)?.statistics?.total_players?.toLocaleString() || '0'}</div>
                 <div className="stat-label">Active Players</div>
               </div>
               <div className="stat-card">
                 <div className="stat-value">
-                  {Math.round(statsData?.statistics?.average_game_duration || 0)}m
+                  {Math.round((statsData as StatisticsOverviewResponse)?.statistics?.average_game_duration || 0)}m
                 </div>
                 <div className="stat-label">Avg Duration</div>
               </div>
