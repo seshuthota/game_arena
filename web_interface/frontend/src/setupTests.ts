@@ -14,13 +14,22 @@ class MockResizeObserver {
 global.ResizeObserver = MockResizeObserver;
 
 // Mock IntersectionObserver
-class MockIntersectionObserver {
+class MockIntersectionObserver implements IntersectionObserver {
+  readonly root: Element | null = null;
+  readonly rootMargin: string = '';
+  readonly thresholds: ReadonlyArray<number> = [];
+  
   observe = jest.fn();
   unobserve = jest.fn();
   disconnect = jest.fn();
+  takeRecords = jest.fn(() => []);
+
+  constructor(callback: IntersectionObserverCallback, options?: IntersectionObserverInit) {
+    // Mock constructor
+  }
 }
 
-global.IntersectionObserver = MockIntersectionObserver;
+global.IntersectionObserver = MockIntersectionObserver as any;
 
 // Mock window.matchMedia
 Object.defineProperty(window, 'matchMedia', {

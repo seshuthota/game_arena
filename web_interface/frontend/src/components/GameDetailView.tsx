@@ -1,9 +1,12 @@
-import React, { memo } from 'react';
+import React, { memo, useState, useCallback, useEffect } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { useGame } from '../hooks/useApi';
 import { GameDetail, GameDetailResponse } from '../types/api';
 import { MoveDetailsPanel } from './MoveDetailsPanel';
 import { GameDetailSkeleton } from './LoadingSkeleton';
+import { ChessBoardComponent } from './ChessBoardComponent';
+import { MoveNavigationControls } from './MoveNavigationControls';
+import { PositionCache } from '../utils/positionCache';
 
 interface GameDetailViewProps {
   gameId?: string;
@@ -788,55 +791,96 @@ const GameHeader: React.FC<GameHeaderProps> = memo(({ game }) => {
   );
 });
 
-// Move List Component
+// Enhanced Move List Component with Chess Board Integration
 interface MoveListProps {
   moves: any[];
   game: GameDetail;
 }
 
 const MoveList: React.FC<MoveListProps> = memo(({ moves, game }) => {
-  const [selectedMoveIndex, setSelectedMoveIndex] = React.useState<number | null>(null);
-  
-  // Keyboard navigation
-  React.useEffect(() => {
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (moves.length === 0) return;
-      
-      switch (event.key) {
-        case 'ArrowLeft':
-          event.preventDefault();
-          setSelectedMoveIndex(prev => 
-            prev === null ? moves.length - 1 : Math.max(0, prev - 1)
-          );
-          break;
-        case 'ArrowRight':
-          event.preventDefault();
-          setSelectedMoveIndex(prev => 
-            prev === null ? 0 : Math.min(moves.length - 1, prev + 1)
-          );
-          break;
-        case 'Home':
-          event.preventDefault();
-          setSelectedMoveIndex(0);
-          break;
-        case 'End':
-          event.preventDefault();
-          setSelectedMoveIndex(moves.length - 1);
-          break;
-        case 'Escape':
-          event.preventDefault();
-          setSelectedMoveIndex(null);
-          break;
-      }
-    };
+  const [selectedMoveIndex, setSelectedMoveIndex] = useState<number | null>(null);
+  const [playMode, setPlayMode] = useState(false);
+  const [playSpeed, setPlaySpeed] = useState(1000);
+  const [positionCache] = useState(() => new PositionCache());
+  const [currentPosition, setCurrentPosition] = useState('rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1');
+  const [lastMove, setLastMove] = useState<{ from: string; to: string } | null>(null);
 
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
+  // Update position when selected move changes
+  useEffect(() => {
+    if (selectedMoveIndex === null) {
+      setCurrentPosition('rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1');
+      setLastMove(null);
+      return;
+    }
+
+    const position = positionCache.getPositionAtMove(selectedMoveIndex, moves);
+    setCurrentPosition(position);
+
+    // Set last move for highlighting
+    if (selectedMoveIndex >= 0 && moves[selectedMoveIndex]) {
+      const move = moves[selectedMoveIndex];
+      // Try to extract from/to from move notation or use placeholder
+      setLastMove({ from: 'e2', to: 'e4' }); // This would need proper parsing
+    }
+  }, [selectedMoveIndex, moves, positionCache]);
+
+  // Auto-play functionality
+  useEffect(() => {
+    if (!playMode || moves.length === 0) return;
+
+    const interval = setInterval(() => {
+      setSelectedMoveIndex(prev => {
+        if (prev === null) return 0;
+        if (prev >= moves.length - 1) {
+          setPlayMode(false);
+          return prev;
+        }
+        return prev + 1;
+      });
+    }, playSpeed);
+
+    return () => clearInterval(interval);
+  }, [playMode, playSpeed, moves.length]);
+
+  const handleMoveClick = useCallback((index: number) => {
+    setSelectedMoveIndex(selectedMoveIndex === index ? null : index);
+  }, [selectedMoveIndex]);
+
+  const handleFirst = useCallback(() => {
+    setSelectedMoveIndex(0);
+  }, []);
+
+  const handlePrevious = useCallback(() => {
+    setSelectedMoveIndex(prev => 
+      prev === null ? moves.length - 1 : Math.max(0, prev - 1)
+    );
   }, [moves.length]);
 
-  const handleMoveClick = (index: number) => {
-    setSelectedMoveIndex(selectedMoveIndex === index ? null : index);
-  };
+  const handleNext = useCallback(() => {
+    setSelectedMoveIndex(prev => 
+      prev === null ? 0 : Math.min(moves.length - 1, prev + 1)
+    );
+  }, [moves.length]);
+
+  const handleLast = useCallback(() => {
+    setSelectedMoveIndex(moves.length - 1);
+  }, [moves.length]);
+
+  const handleJumpToMove = useCallback((index: number) => {
+    if (index < 0) {
+      setSelectedMoveIndex(null);
+    } else {
+      setSelectedMoveIndex(Math.min(index, moves.length - 1));
+    }
+  }, [moves.length]);
+
+  const handleTogglePlay = useCallback(() => {
+    setPlayMode(prev => !prev);
+  }, []);
+
+  const handleSpeedChange = useCallback((speed: number) => {
+    setPlaySpeed(speed);
+  }, []);
   return (
     <div className="move-list-container">
       <div className="move-list-header">
@@ -854,50 +898,33 @@ const MoveList: React.FC<MoveListProps> = memo(({ moves, game }) => {
           </div>
         ) : (
           <div className="move-analysis-container">
+            {/* Chess Board Section */}
+            <div className="chess-board-section">
+              <ChessBoardComponent
+                position={currentPosition}
+                orientation="white"
+                showCoordinates={true}
+                highlightLastMove={true}
+                lastMove={lastMove}
+                disabled={false}
+              />
+              
+              <MoveNavigationControls
+                currentMoveIndex={selectedMoveIndex}
+                totalMoves={moves.length}
+                onFirst={handleFirst}
+                onPrevious={handlePrevious}
+                onNext={handleNext}
+                onLast={handleLast}
+                onJumpToMove={handleJumpToMove}
+                playMode={playMode}
+                onTogglePlay={handleTogglePlay}
+                playSpeed={playSpeed}
+                onSpeedChange={handleSpeedChange}
+              />
+            </div>
+
             <div className="moves-section">
-              <div className="move-navigation-controls">
-                <button
-                  onClick={() => setSelectedMoveIndex(0)}
-                  disabled={moves.length === 0}
-                  className="nav-button"
-                  title="First move (Home)"
-                >
-                  ⏮
-                </button>
-                <button
-                  onClick={() => setSelectedMoveIndex(prev => 
-                    prev === null ? moves.length - 1 : Math.max(0, prev - 1)
-                  )}
-                  disabled={moves.length === 0}
-                  className="nav-button"
-                  title="Previous move (←)"
-                >
-                  ⏪
-                </button>
-                <button
-                  onClick={() => setSelectedMoveIndex(prev => 
-                    prev === null ? 0 : Math.min(moves.length - 1, prev + 1)
-                  )}
-                  disabled={moves.length === 0}
-                  className="nav-button"
-                  title="Next move (→)"
-                >
-                  ⏩
-                </button>
-                <button
-                  onClick={() => setSelectedMoveIndex(moves.length - 1)}
-                  disabled={moves.length === 0}
-                  className="nav-button"
-                  title="Last move (End)"
-                >
-                  ⏭
-                </button>
-                <span className="move-indicator">
-                  {selectedMoveIndex !== null 
-                    ? `Move ${selectedMoveIndex + 1} of ${moves.length}` 
-                    : `${moves.length} moves total`}
-                </span>
-              </div>
               
               <div className="moves-grid">
                 {moves.map((move, index) => (
@@ -1038,6 +1065,14 @@ const MoveList: React.FC<MoveListProps> = memo(({ moves, game }) => {
           gap: 0.5rem;
         }
 
+        .chess-board-section {
+          flex: 1;
+          min-width: 400px;
+          display: flex;
+          flex-direction: column;
+          gap: 1rem;
+        }
+
         .move-details-panel {
           flex: 1;
           min-width: 300px;
@@ -1049,6 +1084,27 @@ const MoveList: React.FC<MoveListProps> = memo(({ moves, game }) => {
           overflow-y: auto;
         }
 
+        @media (max-width: 1024px) {
+          .move-analysis-container {
+            flex-direction: column;
+          }
+
+          .chess-board-section {
+            min-width: auto;
+            order: 1;
+          }
+
+          .moves-section {
+            min-width: auto;
+            order: 2;
+          }
+
+          .move-details-panel {
+            min-width: auto;
+            order: 3;
+          }
+        }
+
         @media (max-width: 768px) {
           .move-list-header {
             padding: 1rem 1.5rem;
@@ -1056,6 +1112,10 @@ const MoveList: React.FC<MoveListProps> = memo(({ moves, game }) => {
 
           .move-list-content {
             padding: 1.5rem;
+          }
+
+          .chess-board-section {
+            align-items: center;
           }
         }
       `}</style>

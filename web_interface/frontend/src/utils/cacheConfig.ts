@@ -236,6 +236,22 @@ export const createInvalidationStrategies = (queryClient: QueryClient) => {
 
 // Performance monitoring for cache effectiveness
 export const createCachePerformanceMonitor = (queryClient: QueryClient) => {
+  const calculateHitRatio = (queries: any[]) => {
+    let hits = 0;
+    let total = 0;
+    
+    queries.forEach(query => {
+      if (query?.state?.data && query?.state?.dataUpdatedAt) {
+        total++;
+        if (query?.state?.fetchStatus === 'idle') {
+          hits++;
+        }
+      }
+    });
+    
+    return total > 0 ? (hits / total) * 100 : 0;
+  };
+
   return {
     getCacheStats: () => {
       const cache = queryClient.getQueryCache();
@@ -249,27 +265,13 @@ export const createCachePerformanceMonitor = (queryClient: QueryClient) => {
         memoryUsage: queries.reduce((acc, q) => {
           return acc + (JSON.stringify(q.state.data || '').length || 0);
         }, 0),
-        cacheHitRatio: this.calculateHitRatio?.(queries) || 0,
+        cacheHitRatio: calculateHitRatio(queries) || 0,
       };
       
       return stats;
     },
     
-    calculateHitRatio: (queries: any[]) => {
-      let hits = 0;
-      let total = 0;
-      
-      queries.forEach(query => {
-        if (query?.state?.data && query?.state?.dataUpdatedAt) {
-          total++;
-          if (query?.state?.fetchStatus === 'idle') {
-            hits++;
-          }
-        }
-      });
-      
-      return total > 0 ? (hits / total) * 100 : 0;
-    },
+    calculateHitRatio,
     
     logCachePerformance: (monitor: any) => {
       if (process.env.NODE_ENV === 'development') {

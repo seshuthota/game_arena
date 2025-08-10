@@ -171,7 +171,7 @@ export const GameListSkeleton: React.FC = () => {
 // Statistics Dashboard Loading Skeleton
 export const StatisticsSkeleton: React.FC = () => {
   return (
-    <div className="statistics-skeleton">
+    <div className="statistics-skeleton" data-testid="loading-skeleton">
       {/* Metrics Cards Skeleton */}
       <div className="skeleton-metrics-grid">
         {Array.from({ length: 4 }).map((_, index) => (

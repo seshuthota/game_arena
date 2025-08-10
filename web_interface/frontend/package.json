@@ -3,11 +3,16 @@
   "version": "0.1.0",
   "private": true,
   "dependencies": {
+    "@chrisoakman/chessboardjs": "^1.0.0",
     "@tanstack/react-query": "^5.17.0",
+    "@types/jquery": "^3.5.32",
     "@types/node": "^20.10.6",
     "@types/react": "^18.2.46",
     "@types/react-dom": "^18.2.18",
     "axios": "^1.6.5",
+    "chess.js": "^1.4.0",
+    "jquery": "^3.7.1",
+    "lucide-react": "^0.539.0",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
     "react-router-dom": "^6.21.1",
@@ -25,20 +30,29 @@
     "@testing-library/jest-dom": "^6.1.6",
     "@testing-library/react": "^14.1.2",
     "@testing-library/user-event": "^14.5.1",
+    "@types/chess.js": "^0.13.7",
     "@types/jest": "^29.5.11",
     "@types/react-window": "^1.8.8",
     "@types/react-window-infinite-loader": "^1.0.9",
     "@typescript-eslint/eslint-plugin": "^5.62.0",
     "@typescript-eslint/parser": "^5.62.0",
+    "bundlesize": "^0.18.1",
     "cypress": "^14.5.4",
     "eslint": "^8.56.0",
     "eslint-plugin-react": "^7.33.2",
     "eslint-plugin-react-hooks": "^4.6.0",
-    "msw": "^2.10.4"
+    "lighthouse": "^11.4.0",
+    "msw": "^2.10.4",
+    "source-map-explorer": "^2.5.3",
+    "start-server-and-test": "^2.0.3",
+    "webpack-bundle-analyzer": "^4.10.1"
   },
   "scripts": {
     "start": "SKIP_PREFLIGHT_CHECK=true TSC_COMPILE_ON_ERROR=true react-scripts start",
     "build": "react-scripts build",
+    "build:analyze": "ANALYZE_BUNDLE=true npm run build",
+    "build:staging": "REACT_APP_STAGE=staging npm run build",
+    "build:production": "REACT_APP_STAGE=production npm run build",
     "test": "react-scripts test",
     "test:coverage": "react-scripts test --coverage --watchAll=false",
     "test:integration": "react-scripts test --testPathPattern=integration.test.tsx --watchAll=false",
@@ -50,7 +64,13 @@
     "cypress:run": "cypress run",
     "e2e": "cypress run --spec 'cypress/e2e/**/*.cy.ts'",
     "test:e2e": "start-server-and-test start http://localhost:3000 cypress:run",
-    "test:all": "npm run test:coverage && npm run e2e"
+    "test:all": "npm run test:coverage && npm run e2e",
+    "deploy:staging": "npm run build:staging && npm run deploy:copy:staging",
+    "deploy:production": "npm run build:production && npm run deploy:copy:production",
+    "deploy:copy:staging": "echo 'Deploy to staging server'",
+    "deploy:copy:production": "echo 'Deploy to production server'",
+    "perf:audit": "npm run build && npx lighthouse http://localhost:3000 --output html --output-path ./lighthouse-report.html",
+    "bundle:size": "npm run build && npx bundlesize"
   },
   "eslintConfig": {
     "extends": [
@@ -70,5 +90,27 @@
       "last 1 safari version"
     ]
   },
+  "bundlesize": [
+    {
+      "path": "build/static/js/chess.*.js",
+      "maxSize": "200KB",
+      "compression": "gzip"
+    },
+    {
+      "path": "build/static/js/vendor.*.js", 
+      "maxSize": "300KB",
+      "compression": "gzip"
+    },
+    {
+      "path": "build/static/js/main.*.js",
+      "maxSize": "150KB", 
+      "compression": "gzip"
+    },
+    {
+      "path": "build/static/css/*.css",
+      "maxSize": "50KB",
+      "compression": "gzip"
+    }
+  ],
   "proxy": "http://localhost:8000"
 }

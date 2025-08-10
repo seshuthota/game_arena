@@ -6,6 +6,7 @@ import { VirtualizedGameList } from './VirtualizedGameList';
 import { GameListSkeleton } from './LoadingSkeleton';
 import { GameListErrorBoundary } from './ErrorBoundary';
 import { LoadingButton } from './LoadingStates';
+import { GameCard } from './GameCard';
 import { useQueryClient } from '@tanstack/react-query';
 import { 
   usePerformanceMonitor, 
@@ -296,9 +297,11 @@ export const GameListView: React.FC<GameListViewProps> = ({
     );
   }
 
+
   return (
     <GameListErrorBoundary>
       <div className="game-list-view">
+
         {/* Controls */}
         <div className="controls-bar">
         <div className="results-info">
@@ -345,7 +348,7 @@ export const GameListView: React.FC<GameListViewProps> = ({
         </div>
       </div>
 
-      {/* Games Display - Virtual or Traditional Table */}
+      {/* Games Display - Virtual or Card-based Layout */}
       {enableVirtualScrolling ? (
         <VirtualizedGameList
           games={allGames}
@@ -356,25 +359,11 @@ export const GameListView: React.FC<GameListViewProps> = ({
           className="virtual-games-container"
         />
       ) : (
-        <div className="games-table-container">
-          <div className="games-table-scroll">
-            <table className="games-table">
-              <thead>
-                <tr className="table-header-row">
-                  <th className="table-header">Game</th>
-                  <th className="table-header">Players</th>
-                  <th className="table-header">Result</th>
-                  <th className="table-header">Duration</th>
-                  <th className="table-header">Moves</th>
-                  <th className="table-header">Started</th>
-                </tr>
-              </thead>
-              <tbody>
-                {games.map((game: any) => (
-                  <GameRow key={game.game_id} game={game} />
-                ))}
-              </tbody>
-            </table>
+        <div className="games-grid-container">
+          <div className="games-grid">
+            {games.map((game: GameSummary) => (
+              <GameCard key={game.game_id} game={game} />
+            ))}
           </div>
         </div>
       )}
@@ -455,37 +444,33 @@ export const GameListView: React.FC<GameListViewProps> = ({
           box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
         }
 
-        .games-table-container {
-          background-color: #ffffff;
-          border: 1px solid #e5e7eb;
-          border-radius: 0.5rem;
-          overflow: hidden;
+        .games-grid-container {
+          margin-bottom: 1.5rem;
+        }
+
+        .games-grid {
+          display: grid;
+          grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+          gap: 1.5rem;
+          padding: 0;
         }
 
         .virtual-games-container {
           margin: 0;
         }
 
-        .games-table-scroll {
-          overflow-x: auto;
+        @media (max-width: 640px) {
+          .games-grid {
+            grid-template-columns: 1fr;
+            gap: 1rem;
+          }
         }
 
-        .games-table {
-          width: 100%;
-          border-collapse: collapse;
-        }
-
-        .table-header-row {
-          background-color: #f9fafb;
-        }
-
-        .table-header {
-          padding: 0.75rem 1rem;
-          text-align: left;
-          font-weight: 600;
-          font-size: 0.875rem;
-          color: #374151;
-          border-bottom: 1px solid #e5e7eb;
+        @media (min-width: 1024px) {
+          .games-grid {
+            grid-template-columns: repeat(auto-fill, minmax(350px, 1fr));
+            gap: 2rem;
+          }
         }
 
         .pagination-container {
@@ -540,253 +525,7 @@ export const GameListView: React.FC<GameListViewProps> = ({
   );
 };
 
-// Individual Game Row Component
-interface GameRowProps {
-  game: GameSummary;
-}
 
-const GameRow: React.FC<GameRowProps> = memo(({ game }) => {
-  const queryClient = useQueryClient();
-  
-  // Memoize expensive calculations
-  const { formattedDuration, formattedDate, resultDisplay, playerEntries } = useMemo(() => {
-    const formatDuration = (minutes: number | null) => {
-      if (!minutes) return 'N/A';
-      if (minutes < 60) return `${Math.round(minutes)}m`;
-      const hours = Math.floor(minutes / 60);
-      const remainingMinutes = Math.round(minutes % 60);
-      return `${hours}h ${remainingMinutes}m`;
-    };
-
-    const formatDate = (dateString: string) => {
-      const date = new Date(dateString);
-      return date.toLocaleDateString() + ' ' + date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-    };
-
-    const getResultDisplay = () => {
-      if (!game.outcome) return <span className="result-ongoing">Ongoing</span>;
-      
-      const playerEntries = Object.entries(game.players);
-      // Fix: Based on move data, player 1 is White and player 0 is Black
-      // So position "1" in players object is White, position "0" is Black
-      const whitePlayer = playerEntries.find(([position]) => position === "1");
-      const blackPlayer = playerEntries.find(([position]) => position === "0");
-      
-      const getWinnerName = (winner: number) => {
-        const player = playerEntries.find(([position]) => parseInt(position) === winner);
-        return player?.[1]?.model_name || 'Unknown';
-      };
-      
-      const formatTermination = (termination?: string) => {
-        if (!termination) return '';
-        switch (termination.toLowerCase()) {
-          case 'checkmate': return ' by checkmate';
-          case 'resignation': return ' by resignation';
-          case 'timeout': return ' on time';
-          case 'stalemate': return ' (stalemate)';
-          case 'agreement': return ' by agreement';
-          case 'abandonment':
-          case 'abandoned': return ' (abandoned)';
-          default: return ` (${termination})`;
-        }
-      };
-      
-      switch (game.outcome.result) {
-        case 'white_wins':
-          const whiteName = whitePlayer?.[1]?.model_name || 'White';
-          return (
-            <span className="result-white">
-              {whiteName} won{formatTermination(game.outcome.termination)}
-            </span>
-          );
-        case 'black_wins':
-          const blackName = blackPlayer?.[1]?.model_name || 'Black';
-          return (
-            <span className="result-black">
-              {blackName} won{formatTermination(game.outcome.termination)}
-            </span>
-          );
-        case 'draw':
-          return (
-            <span className="result-draw">
-              Draw{formatTermination(game.outcome.termination)}
-            </span>
-          );
-        default:
-          return <span className="result-ongoing">Ongoing</span>;
-      }
-    };
-
-    const playerEntries = Object.entries(game.players);
-
-    return {
-      formattedDuration: formatDuration(game.duration_minutes),
-      formattedDate: formatDate(game.start_time),
-      resultDisplay: getResultDisplay(),
-      playerEntries
-    };
-  }, [game.duration_minutes, game.start_time, game.outcome, game.players]);
-
-  // Fix: Based on move data, player 1 is White and player 0 is Black
-  const whitePlayer = playerEntries.find(([position]) => position === "1");
-  const blackPlayer = playerEntries.find(([position]) => position === "0");
-
-  // Performance monitoring in development
-  const shouldMonitor = process.env.NODE_ENV === 'development';
-  usePerformanceMonitor(shouldMonitor ? `GameRow-${game.game_id}` : 'GameRow-disabled');
-  
-  return (
-    <tr 
-      className="game-row"
-      onMouseEnter={() => {
-        // Prefetch game details on hover for better UX
-        cacheUtils.prefetchGame(queryClient, game.game_id).catch(() => {});
-      }}
-    >
-      <td className="table-cell">
-        <Link to={`/games/${game.game_id}`} className="game-link">
-          <div className="game-id">{game.game_id.slice(0, 8)}...</div>
-          {game.tournament_id && (
-            <div className="tournament-id">Tournament: {game.tournament_id}</div>
-          )}
-        </Link>
-      </td>
-      <td className="table-cell">
-        <div className="players-container">
-          <div className="player-info">
-            <span className="player-color">⚪</span>
-            <span className="player-name">{whitePlayer?.[1]?.model_name || 'Unknown'}</span>
-          </div>
-          <div className="vs-divider">vs</div>
-          <div className="player-info">
-            <span className="player-color">⚫</span>
-            <span className="player-name">{blackPlayer?.[1]?.model_name || 'Unknown'}</span>
-          </div>
-        </div>
-      </td>
-      <td className="table-cell">
-        {resultDisplay}
-      </td>
-      <td className="table-cell">
-        {formattedDuration}
-      </td>
-      <td className="table-cell">
-        <span className="moves-count">{game.total_moves}</span>
-      </td>
-      <td className="table-cell">
-        <span className="date-text">{formattedDate}</span>
-      </td>
-
-      <style jsx>{`
-        .game-row {
-          border-bottom: 1px solid #e5e7eb;
-          transition: background-color 0.15s;
-        }
-
-        .game-row:hover {
-          background-color: #f9fafb;
-        }
-
-        .table-cell {
-          padding: 0.75rem 1rem;
-          vertical-align: top;
-        }
-
-        .game-link {
-          text-decoration: none;
-          color: inherit;
-        }
-
-        .game-id {
-          font-family: 'Monaco', 'Courier New', monospace;
-          font-weight: 600;
-          color: #3b82f6;
-          margin-bottom: 0.25rem;
-        }
-
-        .game-link:hover .game-id {
-          text-decoration: underline;
-        }
-
-        .tournament-id {
-          font-size: 0.75rem;
-          color: #6b7280;
-        }
-
-        .players-container {
-          display: flex;
-          flex-direction: column;
-          gap: 0.25rem;
-          min-width: 150px;
-        }
-
-        .player-info {
-          display: flex;
-          align-items: center;
-          gap: 0.5rem;
-        }
-
-        .player-color {
-          font-size: 0.75rem;
-        }
-
-        .player-name {
-          font-size: 0.875rem;
-          font-weight: 500;
-          color: #374151;
-        }
-
-        .vs-divider {
-          font-size: 0.75rem;
-          color: #9ca3af;
-          text-align: center;
-          margin: 0.125rem 0;
-        }
-
-        .result-white {
-          color: #059669;
-          font-weight: 600;
-        }
-
-        .result-black {
-          color: #1f2937;
-          font-weight: 600;
-        }
-
-        .result-draw {
-          color: #d97706;
-          font-weight: 600;
-        }
-
-        .result-ongoing {
-          color: #6b7280;
-          font-style: italic;
-        }
-
-        .moves-count {
-          font-weight: 500;
-          color: #374151;
-        }
-
-        .date-text {
-          font-size: 0.875rem;
-          color: #6b7280;
-          white-space: nowrap;
-        }
-
-        @media (max-width: 768px) {
-          .players-container {
-            min-width: 120px;
-          }
-
-          .player-name {
-            font-size: 0.8125rem;
-          }
-        }
-      `}</style>
-    </tr>
-  );
-});
 
 // Pagination Controls Component
 interface PaginationControlsProps {

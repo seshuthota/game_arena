@@ -82,16 +82,18 @@ export const queryKeys = {
 // Games Hooks
 export const useGames = (
   params?: GameListParams,
-  options?: UseQueryOptions<GameListResponse>
+  options?: Partial<UseQueryOptions<GameListResponse>>
 ) => {
   const cacheConfig = createCacheConfig('critical');
-  return useQuery<GameListResponse>({
+  const queryFn = () => wrapApiCall<GameListResponse>(
+    () => apiService.getGames(params),
+    ErrorCode.GAME_LOAD_FAILED,
+    { action: 'load_games', params }
+  );
+
+  return useQuery({
     queryKey: queryKeys.games(params),
-    queryFn: () => wrapApiCall(
-      () => apiService.getGames(params),
-      ErrorCode.GAME_LOAD_FAILED,
-      { action: 'load_games', params }
-    ) as Promise<GameListResponse>,
+    queryFn,
     ...cacheConfig,
     ...options,
   });
@@ -99,16 +101,18 @@ export const useGames = (
 
 export const useGame = (
   gameId: string,
-  options?: UseQueryOptions<GameDetailResponse>
+  options?: Partial<UseQueryOptions<GameDetailResponse>>
 ) => {
   const cacheConfig = createCacheConfig('medium');
-  return useQuery<GameDetailResponse>({
+  const queryFn = () => wrapApiCall<GameDetailResponse>(
+    () => apiService.getGame(gameId),
+    ErrorCode.GAME_NOT_FOUND,
+    { action: 'load_game', gameId }
+  );
+
+  return useQuery({
     queryKey: queryKeys.game(gameId),
-    queryFn: () => wrapApiCall(
-      () => apiService.getGame(gameId),
-      ErrorCode.GAME_NOT_FOUND,
-      { action: 'load_game', gameId }
-    ) as Promise<GameDetailResponse>,
+    queryFn,
     enabled: !!gameId,
     ...cacheConfig,
     refetchOnMount: false, // Don't refetch completed games
@@ -119,16 +123,18 @@ export const useGame = (
 
 // Statistics Hooks
 export const useStatisticsOverview = (
-  options?: UseQueryOptions<StatisticsOverviewResponse>
+  options?: Partial<UseQueryOptions<StatisticsOverviewResponse>>
 ) => {
   const cacheConfig = createCacheConfig('high');
-  return useQuery<StatisticsOverviewResponse>({
+  const queryFn = () => wrapApiCall<StatisticsOverviewResponse>(
+    () => apiService.getStatisticsOverview(),
+    ErrorCode.STATISTICS_LOAD_FAILED,
+    { action: 'load_statistics_overview' }
+  );
+
+  return useQuery({
     queryKey: queryKeys.statisticsOverview(),
-    queryFn: () => wrapApiCall(
-      () => apiService.getStatisticsOverview(),
-      ErrorCode.STATISTICS_LOAD_FAILED,
-      { action: 'load_statistics_overview' }
-    ) as Promise<StatisticsOverviewResponse>,
+    queryFn,
     ...cacheConfig,
     placeholderData: (previousData: StatisticsOverviewResponse | undefined) => previousData,
     ...options,
